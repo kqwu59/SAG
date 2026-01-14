@@ -4,126 +4,176 @@
         Title="Nettoie XLSX — V16 (WPF)"
         Width="1100"
         Height="760"
-        WindowStartupLocation="CenterScreen">
-    <Grid Margin="24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent">
+    <Grid>
+        <Border CornerRadius="18"
+                Background="{StaticResource GlassBackground}"
+                BorderBrush="{StaticResource GlassBorder}"
+                BorderThickness="1"
+                Padding="1">
+            <Border CornerRadius="16" Background="{StaticResource GlassBackground}">
+                <Grid Margin="24">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Style="{StaticResource SectionCard}" Padding="18">
-            <StackPanel>
-                <TextBlock FontSize="20" FontWeight="SemiBold" Text="✨ Nettoie XLSX — Consolidation SAG" />
-                <TextBlock Foreground="{StaticResource MutedText}"
-                           Text="Importez vos fichiers sources, lancez le traitement et obtenez un export consolidé avec l’onglet Global." />
-            </StackPanel>
-        </Border>
+                    <Grid Grid.Row="0" Margin="0,0,0,12" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock FontSize="16" FontWeight="SemiBold" Text="Nettoie XLSX — V16" />
+                        <Button Grid.Column="1" Content="✕" Width="32" Height="32" Margin="8,0,0,0" Click="CloseButton_Click" />
+                    </Grid>
 
-        <Border Grid.Row="1" Style="{StaticResource SectionCard}" Margin="0,16,0,0">
-            <StackPanel>
-                <TextBlock FontWeight="SemiBold" Text="Fichiers sources" Margin="0,0,0,8" />
-                <Grid Margin="0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="140" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock VerticalAlignment="Center" Text="Commandes (.xlsx)" />
-                    <TextBox Grid.Column="1" Margin="8,0" />
-                    <Button Grid.Column="2" Content="Parcourir…" />
-                </Grid>
-                <Grid Margin="0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="140" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock VerticalAlignment="Center" Text="Constatations (.xlsx)" />
-                    <TextBox Grid.Column="1" Margin="8,0" />
-                    <Button Grid.Column="2" Content="Parcourir…" />
-                </Grid>
-                <Grid Margin="0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="140" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock VerticalAlignment="Center" Text="Factures (.xlsx)" />
-                    <TextBox Grid.Column="1" Margin="8,0" />
-                    <Button Grid.Column="2" Content="Parcourir…" />
-                </Grid>
-                <Grid Margin="0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="140" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock VerticalAlignment="Center" Text="Envoi BDC (.xlsx)" />
-                    <TextBox Grid.Column="1" Margin="8,0" />
-                    <Button Grid.Column="2" Content="Parcourir…" />
-                </Grid>
-                <Grid Margin="0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="140" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock VerticalAlignment="Center" Text="Workflow (.xlsx)" />
-                    <TextBox Grid.Column="1" Margin="8,0" />
-                    <Button Grid.Column="2" Content="Parcourir…" />
-                </Grid>
-            </StackPanel>
-        </Border>
+                    <Border Grid.Row="1" Style="{StaticResource SectionCard}" Padding="18">
+                        <StackPanel>
+                            <TextBlock FontSize="20" FontWeight="SemiBold" Text="✨ Nettoie XLSX — Consolidation SAG" />
+                            <TextBlock Foreground="{StaticResource MutedText}"
+                                       Text="Importez vos fichiers sources, lancez le traitement et obtenez un export consolidé avec l’onglet Global." />
+                        </StackPanel>
+                    </Border>
 
-        <Border Grid.Row="2" Style="{StaticResource SectionCard}" Margin="0,16,0,0">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="220" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="140" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Fichier de sortie (.xlsx)" />
-                <TextBox Grid.Column="1" Margin="8,0" />
-                <Button Grid.Column="2" Content="Parcourir…" />
-                <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Style="{StaticResource PrimaryButton}" Content="Lancer le traitement" />
-                    <Button Content="Vider les champs" Margin="8,0,0,0" />
-                </StackPanel>
-            </Grid>
-        </Border>
+                    <Border Grid.Row="2" Style="{StaticResource SectionCard}" Margin="0,16,0,0">
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold" Text="Fichiers sources" Margin="0,0,0,8" />
+                            <Grid Margin="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="140" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center" Text="Commandes (.xlsx)" />
+                                <TextBox x:Name="CommandesTextBox"
+                                         Grid.Column="1"
+                                         Margin="8,0"
+                                         AllowDrop="True"
+                                         PreviewDragOver="FileTextBox_DragOver"
+                                         Drop="FileTextBox_Drop" />
+                                <Button Grid.Column="2" Content="Parcourir…" Click="BrowseCommandes_Click" />
+                            </Grid>
+                            <Grid Margin="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="140" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center" Text="Constatations (.xlsx)" />
+                                <TextBox x:Name="ConstatationsTextBox"
+                                         Grid.Column="1"
+                                         Margin="8,0"
+                                         AllowDrop="True"
+                                         PreviewDragOver="FileTextBox_DragOver"
+                                         Drop="FileTextBox_Drop" />
+                                <Button Grid.Column="2" Content="Parcourir…" Click="BrowseConstatations_Click" />
+                            </Grid>
+                            <Grid Margin="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="140" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center" Text="Factures (.xlsx)" />
+                                <TextBox x:Name="FacturesTextBox"
+                                         Grid.Column="1"
+                                         Margin="8,0"
+                                         AllowDrop="True"
+                                         PreviewDragOver="FileTextBox_DragOver"
+                                         Drop="FileTextBox_Drop" />
+                                <Button Grid.Column="2" Content="Parcourir…" Click="BrowseFactures_Click" />
+                            </Grid>
+                            <Grid Margin="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="140" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center" Text="Envoi BDC (.xlsx)" />
+                                <TextBox x:Name="EnvoiBdcTextBox"
+                                         Grid.Column="1"
+                                         Margin="8,0"
+                                         AllowDrop="True"
+                                         PreviewDragOver="FileTextBox_DragOver"
+                                         Drop="FileTextBox_Drop" />
+                                <Button Grid.Column="2" Content="Parcourir…" Click="BrowseEnvoiBdc_Click" />
+                            </Grid>
+                            <Grid Margin="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="140" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center" Text="Workflow (.xlsx)" />
+                                <TextBox x:Name="WorkflowTextBox"
+                                         Grid.Column="1"
+                                         Margin="8,0"
+                                         AllowDrop="True"
+                                         PreviewDragOver="FileTextBox_DragOver"
+                                         Drop="FileTextBox_Drop" />
+                                <Button Grid.Column="2" Content="Parcourir…" Click="BrowseWorkflow_Click" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
 
-        <Border Grid.Row="3" Style="{StaticResource SectionCard}" Margin="0,16,0,0">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <TextBlock FontWeight="SemiBold" Text="Journal" />
-                <TextBox Grid.Row="1"
-                         Margin="0,8,0,0"
-                         TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto"
-                         IsReadOnly="True"
-                         Background="White"
-                         BorderBrush="#D5E7FB"
-                         BorderThickness="1"
-                         Text="La présente macro permet d’avoir une vision globale du traitement des commandes de la base 0018." />
-            </Grid>
-        </Border>
+                    <Border Grid.Row="3" Style="{StaticResource SectionCard}" Margin="0,16,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Fichier de sortie (.xlsx)" />
+                            <TextBox x:Name="OutputTextBox"
+                                     Grid.Column="1"
+                                     Margin="8,0" />
+                            <Button Grid.Column="2" Content="Parcourir…" Click="BrowseOutput_Click" />
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button x:Name="RunButton" Style="{StaticResource PrimaryButton}" Content="Lancer le traitement" Click="RunButton_Click" />
+                                <Button Content="Vider les champs" Margin="8,0,0,0" Click="ClearButton_Click" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
 
-        <Border Grid.Row="4" Style="{StaticResource SectionCard}" Margin="0,16,0,0">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="Prêt" />
-                <TextBlock Grid.Column="1" Foreground="{StaticResource MutedText}" Text="V16 (WPF)" />
-            </Grid>
+                    <Border Grid.Row="4" Style="{StaticResource SectionCard}" Margin="0,16,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock FontWeight="SemiBold" Text="Journal" />
+                            <TextBox x:Name="LogTextBox"
+                                     Grid.Row="1"
+                                     Margin="0,8,0,0"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     IsReadOnly="True"
+                                     Background="White"
+                                     BorderBrush="{StaticResource MutedBorder}"
+                                     BorderThickness="1" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="5" Style="{StaticResource SectionCard}" Margin="0,16,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="StatusTextBlock" Text="Prêt" />
+                            <TextBlock Grid.Column="1" Foreground="{StaticResource MutedText}" Text="V16 (WPF)" />
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
         </Border>
     </Grid>
 </Window>

@@ -8,4 +8,8 @@
     <AssemblyName>NettoieXLSX.V16</AssemblyName>
     <RootNamespace>NettoieXLSX.V16</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.1" />
+  </ItemGroup>
 </Project>
