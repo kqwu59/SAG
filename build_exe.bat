@@ -7,8 +7,8 @@ py -m pip install --upgrade pip
 py -m pip install pandas openpyxl tkinterdnd2 pyinstaller
 
 echo Building EXE (onefile, windowed)...
-py -m PyInstaller --noconsole --onefile --name NettoieXLSX-V13 NettoieXLSX_GUI-V13.py
+py -m PyInstaller --noconsole --onefile --name NettoieXLSX-V14 NettoieXLSX_GUI-V14.py
 
 echo.
-echo Build finished. The EXE is located in the "dist" folder as NettoieXLSX-V13.exe
+echo Build finished. The EXE is located in the "dist" folder under NettoieXLSX-V14
 pause

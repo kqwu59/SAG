@@ -1,0 +1,77 @@
+diff --git a/NettoieXLSX_GUI-V13.py b/NettoieXLSX_GUI-V13.py
+index 9e0b24e..e2d1c1f 100644
+--- a/NettoieXLSX_GUI-V13.py
++++ b/NettoieXLSX_GUI-V13.py
+@@ -80,6 +80,40 @@ GLOBAL_RULES_TEXT = (
+     "Déduplication : si deux lignes Global (A..K) sont STRICTEMENT identiques, une seule est conservée.\n"
+     "Si le même BDC présente des différences sur au moins une colonne, toutes les lignes sont gardées."
+ )
++
++GLOBAL_COVER_TEXT = (
++    "PAGE DE GARDE - Colonnes de l'onglet Global\n\n"
++    "A • BDC : repris de Commandes.N° commande (après filtres : Mission / FCM 3MUNDI ESR-M exclus).\n"
++    "B • OBJET : Commandes.Libellé.\n"
++    "C • FOURN. : Commandes.Fournisseur.\n"
++    "D • HT : Commandes.Montant HT.\n"
++    "E • VISA : Commandes.Ind. Visa.\n"
++    "F • ENVOYE : jointure Envoi BDC sur BDC=Commande → 'Date envoi (dd/mm/yyyy) + espace + Agent'.\n"
++    "G • SF :\n"
++    "    - si FOURN. = 'BNP PARIBAS - REGULARISATION CARTE ACHAT' → 'ss objet Régul CA'\n"
++    "    - sinon, si ENVOYE contient 'ss objet Régul CA' → Constatation.Statut (recherche par BDC complet,\n"
++    "      sinon par les 5 premiers caractères)\n"
++    "    - sinon → 'Pas de SF connu'.\n"
++    "H • WORKFLOW : valeur depuis Workflow (colonne 'Date' prioritaire, sinon 'Statut'), jointure sur BDC.\n"
++    "I • PAYE :\n"
++    "    - 0 facture pour le BDC → 'pas de paiement connu'\n"
++    "    - 1 facture → afficher la Date de règlement (date-only si possible ; sinon valeur brute ; sinon 'date manquante')\n"
++    "    - ≥2 factures → 'n paiements'\n"
++    "J • SOLDE : HT (D) − somme des Montants HT de toutes les lignes Factures associées au BDC (2 décimales).\n"
++    "K • STATUT : Commandes.Statut.\n\n"
++    "Déduplication : si deux lignes Global (A..K) sont STRICTEMENT identiques, une seule est conservée.\n"
++    "Si le même BDC présente des différences sur au moins une colonne, toutes les lignes sont gardées."
++)
++
++INTRO_LOG_TEXT = (
++    "La présente macro permet d’avoir une vision globale du traitement des commandes de la base 0018.\n\n"
++    "Pour ce faire, elle exploite plusieurs fichiers au format EXCEL :\n"
++    "- 3 extractions sous Geslab :\n"
++    "   « commandes / réservations » : RAJOUTER dans les paramètres d’affichage : Type de flux et Auteur\n"
++    "   « constatation »\n"
++    "   « facture »\n"
++    "- l’extraction des « workflows » sous DMF\n"
++    "- le fichier « Envoi BDC » sous SAG/TUTOS complété lors du traitement des bons de commande\n\n"
++    "Pour garantir une bonne utilisation de la macro, mettez les bons fichiers sur la bonne ligne correspondante\n"
++    "(Astuce : glissez vos fichiers .xlsx sur les champs !)\n\n"
++    "Dans les fichiers extraits de Geslab, seules les lignes sous 'Liste des résultats' seront prises en compte\n"
++)
+@@ -514,6 +548,15 @@ def create_and_fill_global_sheet(writer, df_cmd, df_envoi, df_fact, df_wf, df_const):
+     ws.row_dimensions[1].height = 30
+     return ws
+ 
++def create_cover_sheet(writer):
++    book = writer.book
++    ws = book.create_sheet("Page de garde")
++    ws["A1"] = GLOBAL_COVER_TEXT
++    ws["A1"].alignment = Alignment(wrap_text=True, vertical="top")
++    ws.column_dimensions["A"].width = 120
++    ws.row_dimensions[1].height = 600
++    return ws
+@@ -572,9 +615,8 @@ class App(BaseTk):
+         self.log.grid(row=7, column=0, columnspan=3, sticky="nsew", pady=(6,0))
+         frm.grid_columnconfigure(1, weight=1)
+ 
+-        self._log("Attention, mettez les bons fichiers sur la bonne ligne")
+-        self._log("Astuce : glissez vos fichiers .xlsx sur les champs .")
+-        self._log("Seules les lignes sous 'Liste des résultats' seront prises en compte.")
++        for line in INTRO_LOG_TEXT.strip().splitlines():
++            self._log(line)
+         if not DND_AVAILABLE:
+             self._log("Drag & drop indisponible : installez 'tkinterdnd2' (pip install tkinterdnd2).")
+@@ -670,6 +712,8 @@ class App(BaseTk):
+             order = ["Commande", "Envoi BDC", "Constatation", "Factures", "Workflow"]
+             with pd.ExcelWriter(outfile, engine="openpyxl") as writer:
++                self._log("Création de la page de garde")
++                create_cover_sheet(writer)
+                 for name in order:
+                     if name in dfs:
+                         self._log(f"Écriture de la feuille {name}")
