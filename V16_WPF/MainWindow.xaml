@@ -73,6 +73,8 @@
                     <TextBox x:Name="CommandesTextBox"
                              Grid.Column="1"
                              Margin="8,0"
+                             AllowDrop="True" />
+                    <Button x:Name="BrowseCommandesButton" Grid.Column="2" Content="Parcourir…" />
                              AllowDrop="True"
                              PreviewDragOver="OnFileDragOver"
                              Drop="OnFileDrop" />

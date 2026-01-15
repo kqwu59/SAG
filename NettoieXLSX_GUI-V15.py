@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """
-NettoieXLSX_GUI.py (V8.5)
+NettoieXLSX_GUI.py (V15)
 - Fichiers optionnels et ordre UI : Commandes, Constatations, Factures, Envoi BDC, Workflow
 - Nettoyages :
   * Commandes : DROP 20 premières lignes, garder & ordonner :
@@ -38,68 +39,133 @@ NettoieXLSX_GUI.py (V8.5)
 """
 
 import os
+import threading
 import unicodedata
 import datetime as dt
+import importlib
+import importlib.util
 from decimal import Decimal, InvalidOperation
 
-import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, Alignment
-
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
+import tkinter.font as tkfont
+
+_TTKBOOTSTRAP_AVAILABLE = importlib.util.find_spec("ttkbootstrap") is not None
+if _TTKBOOTSTRAP_AVAILABLE:
+    ttkbootstrap = importlib.import_module("ttkbootstrap")
+    ttk = ttkbootstrap
+    StyleBase = ttkbootstrap.Style
+else:
+    from tkinter import ttk
+    StyleBase = None
 
 # -------- Réglages d'affichage --------
 GLOBAL_WIDTH_OFFSET = 0.64  # correction écart Excel
 GLOBAL_COLUMN_WIDTHS = [7.09, 36.09, 70, 12.09, 16, 14, 16.82, 30, 8.09, 8.09, 12.0]  # A..K
 
-GLOBAL_RULES_TEXT = (
-    "Règles des colonnes Global (A→K)\n\n"
-    "A • BDC : repris de Commandes.N° commande (après filtres : Mission / FCM 3MUNDI ESR-M exclus).\n"
-    "B • OBJET : Commandes.Libellé.\n"
-    "C • FOURN. : Commandes.Fournisseur.\n"
-    "D • HT : Commandes.Montant HT.\n"
-    "E • VISA : Commandes.Ind. Visa.\n"
-    "F • ENVOYE : jointure Envoi BDC sur BDC=Commande → 'Date envoi (dd/mm/yyyy) + espace + Agent'.\n"
-    "G • SF :\n"
-    "    - si FOURN. = 'BNP PARIBAS - REGULARISATION CARTE ACHAT' → 'ss objet Régul CA'\n"
-    "    - sinon, si ENVOYE contient 'ss objet Régul CA' → Constatation.Statut (recherche par BDC complet,\n"
-    "      sinon par les 5 premiers caractères)\n"
-    "    - sinon → 'Pas de SF connu'.\n"
-    "H • WORKFLOW : valeur depuis Workflow (colonne 'Date' prioritaire, sinon 'Statut'), jointure sur BDC.\n"
-    "I • PAYE :\n"
-    "    - 0 facture pour le BDC → 'pas de paiement connu'\n"
-    "    - 1 facture → afficher la Date de règlement (date-only si possible ; sinon valeur brute ; sinon 'date manquante')\n"
-    "    - ≥2 factures → 'n paiements'\n"
-    "J • SOLDE : HT (D) − somme des Montants HT de toutes les lignes Factures associées au BDC (2 décimales).\n"
-    "K • STATUT : Commandes.Statut.\n\n"
-    "Déduplication : si deux lignes Global (A..K) sont STRICTEMENT identiques, une seule est conservée.\n"
-    "Si le même BDC présente des différences sur au moins une colonne, toutes les lignes sont gardées."
-)
-
 GLOBAL_COVER_TEXT = (
-    "PAGE DE GARDE - Colonnes de l'onglet Global\n\n"
-    "A • BDC : repris de Commandes.N° commande (après filtres : Mission / FCM 3MUNDI ESR-M exclus).\n"
-    "B • OBJET : Commandes.Libellé.\n"
-    "C • FOURN. : Commandes.Fournisseur.\n"
-    "D • HT : Commandes.Montant HT.\n"
-    "E • VISA : Commandes.Ind. Visa.\n"
-    "F • ENVOYE : jointure Envoi BDC sur BDC=Commande → 'Date envoi (dd/mm/yyyy) + espace + Agent'.\n"
-    "G • SF :\n"
-    "    - si FOURN. = 'BNP PARIBAS - REGULARISATION CARTE ACHAT' → 'ss objet Régul CA'\n"
-    "    - sinon, si ENVOYE contient 'ss objet Régul CA' → Constatation.Statut (recherche par BDC complet,\n"
-    "      sinon par les 5 premiers caractères)\n"
-    "    - sinon → 'Pas de SF connu'.\n"
-    "H • WORKFLOW : valeur depuis Workflow (colonne 'Date' prioritaire, sinon 'Statut'), jointure sur BDC.\n"
-    "I • PAYE :\n"
-    "    - 0 facture pour le BDC → 'pas de paiement connu'\n"
-    "    - 1 facture → afficher la Date de règlement (date-only si possible ; sinon valeur brute ; sinon 'date manquante')\n"
-    "    - ≥2 factures → 'n paiements'\n"
-    "J • SOLDE : HT (D) − somme des Montants HT de toutes les lignes Factures associées au BDC (2 décimales).\n"
-    "K • STATUT : Commandes.Statut.\n\n"
-    "Déduplication : si deux lignes Global (A..K) sont STRICTEMENT identiques, une seule est conservée.\n"
-    "Si le même BDC présente des différences sur au moins une colonne, toutes les lignes sont gardées."
+    "Document de référence — construction de l’onglet Global\n"
+    "Objectif : partir de vos fichiers sources, aligner les informations par numéro de commande (BDC) et remplir Global colonne par colonne.\n\n"
+    "# 1) D’où viennent les données (nettoyage de départ)\n\n"
+    "On ne garde que ce qu’il y a sous la ligne “Liste des résultats”.\n\n"
+    "• Feuille “Commande”\n"
+    "  Colonnes conservées : N° commande, Libellé, Fournisseur, Montant HT, Type de flux, Nature de dépense, Statut, Ind. Visa, Auteur.\n"
+    "  On retire les lignes où Fournisseur = FCM 3MUNDI ESR-M ou Nature de dépense = Mission.\n\n"
+    "• Feuille “Constatation”\n"
+    "  Colonnes : Commande, extrait commande (les 5 premiers caractères de Commande), Statut.\n\n"
+    "• Feuille “Envoi BDC”\n"
+    "  Colonnes : Commande, Date envoi, Agent.\n"
+    "  Les dates sont affichées sans l’heure.\n\n"
+    "• Feuille “Factures”\n"
+    "  Colonnes : N° commande, Montant HT, Date de règlement.\n"
+    "  On retire les lignes où Nature de dépense = MI ou Fournisseur = FCM 3MUNDI ESR-M.\n"
+    "  Les dates sont affichées sans l’heure.\n\n"
+    "• Feuille “Workflow”\n"
+    "  On garde tout. Plus tard, on y cherchera une colonne BDC (le numéro de commande) et une Date ou un Statut.\n\n"
+    "# 2) La clé qui relie tout : le BDC\n\n"
+    "Tout est relié avec le numéro de commande.\n\n"
+    "• Global.A (BDC) vient de Commande → N° commande.\n"
+    "• On cherche la même valeur :\n"
+    "  - dans Envoi BDC → Commande,\n"
+    "  - dans Factures → N° commande,\n"
+    "  - dans Workflow → (colonne BDC détectée automatiquement),\n"
+    "  - dans Constatation → Commande (ou, si rien, extrait commande = 5 premiers caractères du BDC).\n\n"
+    "Important : le BDC est traité comme du texte (Excel ne le transforme pas).\n\n"
+    "# 3) Comment on remplit chaque colonne de Global (A → K)\n\n"
+    "A — BDC\n"
+    "• Prend : Commande → N° commande.\n"
+    "• Affichage : texte.\n\n"
+    "B — OBJET\n"
+    "• Prend : Commande → Libellé.\n"
+    "• Si vide : \"-\".\n\n"
+    "C — FOURN.\n"
+    "• Prend : Commande → Fournisseur.\n"
+    "• Si vide : \"-\".\n\n"
+    "D — HT\n"
+    "• Prend : Commande → Montant HT.\n"
+    "• Utilité : sert de base pour calculer le Solde (colonne J).\n\n"
+    "E — VISA\n"
+    "• Prend : Commande → Ind. Visa.\n"
+    "• Si vide : \"-\".\n\n"
+    "F — ENVOYE\n"
+    "• Jointure : Envoi BDC → Commande = Global.A (BDC).\n"
+    "• Prend : Date envoi (sans heure) + un espace + Agent.\n"
+    "  - S’il n’y a que la date : on montre la date.\n"
+    "  - S’il n’y a que l’agent : on montre l’agent.\n"
+    "  - S’il n’y a rien : cellule vide.\n\n"
+    "G — SF\n"
+    "• Règle 1 : si Global.C (FOURN.) = BNP PARIBAS - REGULARISATION CARTE ACHAT → ss objet Régul CA.\n"
+    "• Sinon, Règle 2 : si Global.F (ENVOYE) contient le texte ss objet Régul CA, alors :\n"
+    "  - on cherche dans Constatation le Statut pour ce BDC\n"
+    "    * d’abord sur Commande = Global.A,\n"
+    "    * sinon via extrait commande = 5 premiers caractères de Global.A.\n"
+    "  - Si on trouve un Statut : on l’affiche. Sinon : Pas de SF connu.\n"
+    "• Sinon (aucun des deux cas) : Pas de SF connu.\n\n"
+    "H — WORKFLOW\n"
+    "• Jointure : Workflow → (colonne BDC) = Global.A (BDC).\n"
+    "• Prend : en priorité la colonne Date (sans heure). Si pas de Date, on prend une colonne Statut.\n"
+    "• Si rien trouvé : cellule vide.\n\n"
+    "I — PAYE\n"
+    "• Sélection : toutes les lignes de Factures où N° commande = Global.A.\n"
+    "• Affichage :\n"
+    "  - 0 ligne → pas de paiement connu.\n"
+    "  - 1 ligne → la Date de règlement :\n"
+    "    * si Excel la reconnaît comme date → jj/mm/aaaa,\n"
+    "    * sinon on affiche tel quel,\n"
+    "    * si vide → date manquante.\n"
+    "  - 2 lignes ou plus → n paiements (pluriel seulement à partir de 2).\n\n"
+    "J — SOLDE\n"
+    "• Calcul : Global.D (HT) moins la somme des Montant HT de toutes les lignes Factures du même BDC.\n"
+    "• Affichage : nombre avec 2 décimales.\n"
+    "• Exemple : D = 110,25 et Factures = 36,75 + 36,75 + 36,75 → Solde = 110,25 − 110,25 = 0,00.\n\n"
+    "K — STATUT\n"
+    "• Prend : Commande → Statut.\n"
+    "• Si vide : \"-\".\n\n"
+    "# 4) Doublons\n\n"
+    "• On supprime uniquement les lignes strictement identiques (A→K identiques).\n"
+    "• Si le même BDC a des valeurs différentes quelque part, on garde les lignes (car l’information n’est pas la même).\n\n"
+    "# 5) Exemple très concret\n\n"
+    "Supposons :\n"
+    "• Commande : N° commande = 12690, Libellé = Clavier, Fournisseur = DELL, Montant HT = 110,25, Ind. Visa = OK, Statut = Validé.\n"
+    "• Envoi BDC : Commande = 12690, Date envoi = 05/01/2026, Agent = Dupont.\n"
+    "• Constatation : Commande = 12690, Statut = Reçu.\n"
+    "• Factures : 3 lignes avec N° commande = 12690, Montant HT = 36,75, Date de règlement = 10/01/2026, 15/01/2026, 20/01/2026.\n"
+    "• Workflow : pour BDC = 12690, Date = 09/01/2026.\n\n"
+    "Résultat Global pour la ligne BDC 12690 :\n"
+    "A BDC = 12690\n"
+    "B OBJET = Clavier\n"
+    "C FOURN. = DELL\n"
+    "D HT = 110,25\n"
+    "E VISA = OK\n"
+    "F ENVOYE = 05/01/2026 Dupont\n"
+    "G SF = Pas de SF connu (car FOURN. ≠ BNP… et F ne contient pas “ss objet Régul CA”)\n"
+    "H WORKFLOW = 09/01/2026\n"
+    "I PAYE = 3 paiements (comme il y a 3 factures)\n"
+    "J SOLDE = 110,25 − (36,75 + 36,75 + 36,75) = 0,00\n"
+    "K STATUT = Validé\n\n"
+    "# 6) En deux phrases\n\n"
+    "1. Chaque ligne de Global est d’abord une ligne de Commande, enrichie avec ce qu’on trouve dans Envoi BDC, Constatation, Factures et Workflow, via le BDC.\n"
+    "2. On calcule Payé et Solde avec Factures, on applique la règle SF, on formate les dates, et on enlève seulement les lignes 100% identiques.\n"
 )
 
 INTRO_LOG_TEXT = (
@@ -113,8 +179,42 @@ INTRO_LOG_TEXT = (
     "- le fichier « Envoi BDC » sous SAG/TUTOS complété lors du traitement des bons de commande\n\n"
     "Pour garantir une bonne utilisation de la macro, mettez les bons fichiers sur la bonne ligne correspondante\n"
     "(Astuce : glissez vos fichiers .xlsx sur les champs !)\n\n"
-    "Dans les fichiers extraits de Geslab, seules les lignes sous 'Liste des résultats' seront prises en compte\n"
+    "Dans les fichiers extraits de Geslab, seules les lignes sous 'Liste des résultats' seront prises en compte.\n"
 )
+
+# Lazy imports pour accélérer l'ouverture de l'interface
+pd = None
+load_workbook = None
+get_column_letter = None
+Font = None
+Alignment = None
+_DEPS_LOADED = False
+_DEPS_ERROR = None
+
+def ensure_deps_loaded():
+    global pd, load_workbook, get_column_letter, Font, Alignment, _DEPS_LOADED, _DEPS_ERROR
+    if _DEPS_LOADED:
+        return
+    if _DEPS_ERROR is not None:
+        raise _DEPS_ERROR
+    try:
+        import pandas as _pd
+        from openpyxl import load_workbook as _load_workbook
+        from openpyxl.utils import get_column_letter as _get_column_letter
+        from openpyxl.styles import Font as _Font, Alignment as _Alignment
+        pd = _pd
+        load_workbook = _load_workbook
+        get_column_letter = _get_column_letter
+        Font = _Font
+        Alignment = _Alignment
+        _DEPS_LOADED = True
+    except Exception as exc:
+        _DEPS_ERROR = exc
+        raise
+
+def preload_deps_in_background():
+    thread = threading.Thread(target=ensure_deps_loaded, daemon=True)
+    thread.start()
 
 # Drag & drop (optionnel)
 try:
@@ -137,6 +237,7 @@ def normalize_colname(name: str) -> str:
     return " ".join(s.split())
 
 def to_date_only(value):
+    ensure_deps_loaded()
     if pd.isna(value): return ""
     if isinstance(value, (pd.Timestamp, dt.datetime)): return value.date()
     if isinstance(value, dt.date): return value
@@ -153,6 +254,7 @@ def date_to_text_dmy(value):
     return str(d).strip()
 
 def strip_times_in_worksheet(ws):
+    ensure_deps_loaded()
     import re
     pat = re.compile(r"^\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\s+\d{1,2}:\d{2}(:\d{2})?\s*$")
     for row in ws.iter_rows():
@@ -168,6 +270,7 @@ def strip_times_in_worksheet(ws):
                     cell.number_format = "dd/mm/yyyy"
 
 def read_after_skip(xlsx_path: str, skip_rows: int):
+    ensure_deps_loaded()
     df_all = pd.read_excel(xlsx_path, sheet_name=0, header=None, engine="openpyxl")
     df = df_all.iloc[skip_rows:].copy()
     # entête = première ligne avec ≥2 valeurs non vides
@@ -187,6 +290,7 @@ def read_after_skip(xlsx_path: str, skip_rows: int):
     return data
 
 def dataframe_below_marker_or_first(xlsx_path: str, marker="liste des resultats"):
+    ensure_deps_loaded()
     wb = load_workbook(xlsx_path, data_only=True)
     marker_norm = normalize_colname(marker)
     found_sheet, found_row = None, None
@@ -364,6 +468,7 @@ def choose_workflow_value_column(df_wf: pd.DataFrame):
     return c_bdc, None
 
 def create_and_fill_global_sheet(writer, df_cmd, df_envoi, df_fact, df_wf, df_const):
+    ensure_deps_loaded()
     book = writer.book
     ws = book.create_sheet("Global")
 
@@ -528,12 +633,15 @@ def create_and_fill_global_sheet(writer, df_cmd, df_envoi, df_fact, df_wf, df_co
     return ws
 
 def create_cover_sheet(writer):
+    ensure_deps_loaded()
     book = writer.book
     ws = book.create_sheet("Page de garde")
-    ws["A1"] = GLOBAL_COVER_TEXT
-    ws["A1"].alignment = Alignment(wrap_text=True, vertical="top")
+    for row_idx, line in enumerate(GLOBAL_COVER_TEXT.splitlines(), start=1):
+        cell = ws.cell(row=row_idx, column=1, value=line)
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+        ws.row_dimensions[row_idx].height = 18
     ws.column_dimensions["A"].width = 120
-    ws.row_dimensions[1].height = 600
+    ws.freeze_panes = "A2"
     return ws
 
 # -------- GUI --------
@@ -542,12 +650,39 @@ BaseTk = TkinterDnD.Tk if DND_AVAILABLE else tk.Tk
 class App(BaseTk):
     def __init__(self):
         super().__init__()
-        self.title("Nettoie XLSX (Commandes / Constatations / Factures / Envoi BDC / Workflow)")
-        self.geometry("980x620")
-        self.resizable(False, False)
+        self.title("Nettoie XLSX — V15")
+        self.geometry("1060x740")
+        self.minsize(980, 700)
 
-        padd = {'padx': 8, 'pady': 6}
-        frm = ttk.Frame(self); frm.pack(fill="both", expand=True, **padd)
+        if StyleBase is not None:
+            StyleBase(master=self, theme="minty")
+        else:
+            style = ttk.Style()
+            if "clam" in style.theme_names():
+                style.theme_use("clam")
+
+        self.configure(bg="#eef6ff")
+        padding = {"padx": 16, "pady": 10}
+        frm = tk.Frame(self, bg="#eef6ff")
+        frm.pack(fill="both", expand=True, **padding)
+
+        title_font = tkfont.Font(size=16, weight="bold")
+        subtitle_font = tkfont.Font(size=10)
+
+        header = tk.Frame(frm, bg="#d9f1ff", highlightthickness=1, highlightbackground="#b6dbf7")
+        header.grid(row=0, column=0, columnspan=3, sticky="we", pady=(0, 12))
+        ttk.Label(
+            header,
+            text="✨ Nettoie XLSX — Consolidation SAG",
+            font=title_font,
+            background="#d9f1ff",
+        ).pack(anchor="w", padx=12, pady=(8, 0))
+        ttk.Label(
+            header,
+            text="Importez vos fichiers sources, lancez le traitement et obtenez un export consolidé avec l’onglet Global.",
+            font=subtitle_font,
+            background="#d9f1ff",
+        ).pack(anchor="w", padx=12, pady=(0, 8))
 
         # Variables
         self.commandes_var = tk.StringVar()
@@ -556,41 +691,91 @@ class App(BaseTk):
         self.envoi_var = tk.StringVar()
         self.workflow_var = tk.StringVar()
         self.outfile_var = tk.StringVar()
+        self.status_var = tk.StringVar(value="Prêt")
 
         # Lignes fichiers (ordre demandé)
-        self._row_file(frm, "Commandes (.xlsx)", self.commandes_var)
-        self._row_file(frm, "Constatations (.xlsx)", self.constatations_var)
-        self._row_file(frm, "Factures (.xlsx)", self.factures_var)
-        self._row_file(frm, "Envoi BDC (.xlsx)", self.envoi_var)
-        self._row_file(frm, "Workflow (.xlsx)", self.workflow_var)
+        src_frame = tk.LabelFrame(
+            frm,
+            text="Fichiers sources",
+            bg="#f7fbff",
+            fg="#1f4a7c",
+            highlightthickness=1,
+            highlightbackground="#c6dcf5",
+        )
+        src_frame.grid(row=1, column=0, columnspan=3, sticky="we", pady=(0, 10))
+        src_frame.grid_columnconfigure(1, weight=1)
+        self._row_file(src_frame, 0, "Commandes (.xlsx)", self.commandes_var)
+        self._row_file(src_frame, 1, "Constatations (.xlsx)", self.constatations_var)
+        self._row_file(src_frame, 2, "Factures (.xlsx)", self.factures_var)
+        self._row_file(src_frame, 3, "Envoi BDC (.xlsx)", self.envoi_var)
+        self._row_file(src_frame, 4, "Workflow (.xlsx)", self.workflow_var)
 
         # Sortie
-        ttk.Label(frm, text="Fichier de sortie (.xlsx)").grid(row=5, column=0, sticky="w")
-        ttk.Entry(frm, textvariable=self.outfile_var, width=78).grid(row=5, column=1, sticky="we")
-        ttk.Button(frm, text="Parcourir…", command=self._pick_outfile).grid(row=5, column=2, sticky="we")
+        out_frame = tk.LabelFrame(
+            frm,
+            text="Export",
+            bg="#f7fbff",
+            fg="#1f4a7c",
+            highlightthickness=1,
+            highlightbackground="#c6dcf5",
+        )
+        out_frame.grid(row=2, column=0, columnspan=3, sticky="we", pady=(0, 10))
+        out_frame.grid_columnconfigure(1, weight=1)
+        ttk.Label(out_frame, text="Fichier de sortie (.xlsx)", background="#f7fbff").grid(
+            row=0, column=0, sticky="w", padx=8, pady=6
+        )
+        ttk.Entry(out_frame, textvariable=self.outfile_var).grid(row=0, column=1, sticky="we", padx=8, pady=6)
+        ttk.Button(out_frame, text="Parcourir…", command=self._pick_outfile).grid(row=0, column=2, sticky="we", padx=8, pady=6)
 
         # Boutons
-        btns = ttk.Frame(frm); btns.grid(row=6, column=0, columnspan=3, sticky="we", pady=10)
+        btns = ttk.Frame(frm)
+        btns.grid(row=3, column=0, columnspan=3, sticky="we", pady=(0, 10))
         ttk.Button(btns, text="Lancer le traitement", command=self.run).pack(side="left", padx=4)
         ttk.Button(btns, text="Vider les champs", command=self.clear_fields).pack(side="left", padx=4)
-        ttk.Button(btns, text="Règles Global (A→K)", command=self.show_rules).pack(side="left", padx=12)
 
         # Log (exactement tes lignes)
-        self.log = tk.Text(frm, height=16)
-        self.log.grid(row=7, column=0, columnspan=3, sticky="nsew", pady=(6,0))
-        frm.grid_columnconfigure(1, weight=1)
+        log_frame = tk.LabelFrame(
+            frm,
+            text="Journal",
+            bg="#f7fbff",
+            fg="#1f4a7c",
+            highlightthickness=1,
+            highlightbackground="#c6dcf5",
+        )
+        log_frame.grid(row=4, column=0, columnspan=3, sticky="nsew")
+        log_frame.grid_columnconfigure(0, weight=1)
+        log_frame.grid_rowconfigure(0, weight=1)
+        self.log = tk.Text(
+            log_frame,
+            height=16,
+            wrap="word",
+            bg="#ffffff",
+            highlightthickness=1,
+            highlightbackground="#d5e7fb",
+        )
+        scrollbar = ttk.Scrollbar(log_frame, command=self.log.yview)
+        self.log.configure(yscrollcommand=scrollbar.set)
+        self.log.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        frm.grid_columnconfigure(0, weight=1)
+        frm.grid_rowconfigure(4, weight=1)
 
         for line in INTRO_LOG_TEXT.strip().splitlines():
             self._log(line)
         if not DND_AVAILABLE:
             self._log("Drag & drop indisponible : installez 'tkinterdnd2' (pip install tkinterdnd2).")
+        preload_deps_in_background()
+
+        status = tk.Frame(frm, bg="#eef6ff")
+        status.grid(row=5, column=0, columnspan=3, sticky="we", pady=(8, 0))
+        ttk.Label(status, textvariable=self.status_var, background="#eef6ff").pack(anchor="w")
 
     # UI helpers
-    def _row_file(self, parent, label, var):
-        r = len(parent.grid_slaves()) // 3
-        ttk.Label(parent, text=label).grid(row=r, column=0, sticky="w")
-        entry = ttk.Entry(parent, textvariable=var, width=78); entry.grid(row=r, column=1, sticky="we")
-        ttk.Button(parent, text="Parcourir…", command=lambda v=var: self._pick(v)).grid(row=r, column=2, sticky="we")
+    def _row_file(self, parent, row, label, var):
+        ttk.Label(parent, text=label, background="#f7fbff").grid(row=row, column=0, sticky="w", padx=8, pady=6)
+        entry = ttk.Entry(parent, textvariable=var)
+        entry.grid(row=row, column=1, sticky="we", padx=8, pady=6)
+        ttk.Button(parent, text="Parcourir…", command=lambda v=var: self._pick(v)).grid(row=row, column=2, sticky="we", padx=8, pady=6)
         if DND_AVAILABLE:
             entry.drop_target_register(DND_FILES)
             entry.dnd_bind('<<Drop>>', lambda e, v=var: self._on_drop(e, v))
@@ -627,22 +812,19 @@ class App(BaseTk):
         self.factures_var.set(""); self.envoi_var.set("")
         self.workflow_var.set(""); self.outfile_var.set("")
         self.log.delete("1.0","end")
-
-    def show_rules(self):
-        win = tk.Toplevel(self)
-        win.title("Règles Global (A→K)")
-        win.geometry("720x520")
-        win.resizable(True, True)
-        txt = tk.Text(win, wrap="word")
-        txt.pack(fill="both", expand=True)
-        txt.insert("1.0", GLOBAL_RULES_TEXT)
-        txt.config(state="disabled")
+        self.status_var.set("Prêt")
 
     def _log(self, msg):
         self.log.insert("end", msg+"\n"); self.log.see("end"); self.update_idletasks()
 
     # Run
     def run(self):
+        try:
+            ensure_deps_loaded()
+        except Exception as exc:
+            messagebox.showerror("Erreur de dépendances", f"Impossible de charger pandas/openpyxl : {exc}")
+            return
+        self.status_var.set("Traitement en cours…")
         files = {
             "Commandes": self.commandes_var.get().strip(),
             "Constatations": self.constatations_var.get().strip(),
@@ -709,10 +891,12 @@ class App(BaseTk):
 
             self._log(f"✔ Terminé. Fichier créé : {outfile}")
             messagebox.showinfo("Terminé", f"Fichier créé :\n{outfile}")
+            self.status_var.set("Terminé")
 
         except Exception as e:
             self._log(f"✖ Erreur : {e}")
             messagebox.showerror("Erreur", f"Echec du traitement : {e}")
+            self.status_var.set("Erreur")
 
 if __name__ == "__main__":
     app = App()
