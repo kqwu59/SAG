@@ -403,17 +403,37 @@ public sealed class ExcelProcessor
             for (var col = 0; col < table.Columns.Count; col++)
             {
                 var value = table.Rows[row][col];
-                if (value is DateTime dateValue)
+                var cell = sheet.Cell(row + 2, col + 1);
+                switch (value)
                 {
-                    sheet.Cell(row + 2, col + 1).Value = dateValue.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
-                }
-                else if (value is decimal decValue)
-                {
-                    sheet.Cell(row + 2, col + 1).Value = decValue;
-                }
-                else
-                {
-                    sheet.Cell(row + 2, col + 1).Value = value;
+                    case DateTime dateValue:
+                        cell.Value = dateValue.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+                        break;
+                    case decimal decValue:
+                        cell.Value = Convert.ToDouble(decValue, CultureInfo.InvariantCulture);
+                        break;
+                    case double doubleValue:
+                        cell.Value = doubleValue;
+                        break;
+                    case float floatValue:
+                        cell.Value = floatValue;
+                        break;
+                    case int intValue:
+                        cell.Value = intValue;
+                        break;
+                    case long longValue:
+                        cell.Value = longValue;
+                        break;
+                    case bool boolValue:
+                        cell.Value = boolValue;
+                        break;
+                    case DBNull:
+                    case null:
+                        cell.Value = string.Empty;
+                        break;
+                    default:
+                        cell.Value = value.ToString();
+                        break;
                 }
             }
         }
@@ -494,11 +514,13 @@ public sealed class ExcelProcessor
             for (var col = 1; col <= lastCol; col++)
             {
                 var cell = sheet.Cell(row, col);
-                var value = cell.Value;
-                if (value is double numeric && cell.DataType == XLDataType.DateTime)
+                object value = cell.DataType switch
                 {
-                    value = DateTime.FromOADate(numeric);
-                }
+                    XLDataType.DateTime => cell.GetDateTime(),
+                    XLDataType.Number => cell.GetDouble(),
+                    XLDataType.Boolean => cell.GetBoolean(),
+                    _ => cell.GetString()
+                };
                 dataRow[col - 1] = value;
                 if (!string.IsNullOrWhiteSpace(cell.GetString()))
                 {
