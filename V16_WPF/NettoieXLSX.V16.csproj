@@ -7,9 +7,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>NettoieXLSX.V16</AssemblyName>
     <RootNamespace>NettoieXLSX.V16</RootNamespace>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
   </PropertyGroup>
-
   <ItemGroup>
-    <PackageReference Include="ClosedXML" Version="0.104.1" />
+    <ApplicationDefinition Include="App.xaml" />
+    <Page Include="MainWindow.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.102.3" />
   </ItemGroup>
 </Project>
