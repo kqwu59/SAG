@@ -9,14 +9,11 @@
     <RootNamespace>NettoieXLSX.V16</RootNamespace>
     <EnableDefaultItems>false</EnableDefaultItems>
     <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
-    <EnableDefaultPageItems>false</EnableDefaultPageItems>
   </PropertyGroup>
 
   <ItemGroup>
     <ApplicationDefinition Remove="**/*.xaml" />
     <Page Remove="**/*.xaml" />
-    <ApplicationDefinition Include="App.xaml" />
-    <Page Include="MainWindow.xaml" />
     <Compile Include="App.xaml.cs">
       <DependentUpon>App.xaml</DependentUpon>
     </Compile>
