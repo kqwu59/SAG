@@ -1,850 +1,688 @@
-using System;
-using System.Collections.Generic;
+using System.Data;
 using System.Globalization;
-using System.IO;
-using System.Linq;
 using System.Text;
 using ClosedXML.Excel;
 
-namespace NettoieXLSX.V16
+namespace NettoieXLSX.V16;
+
+public sealed class ExcelProcessor
 {
-    public static class ExcelProcessor
+    private static readonly Dictionary<string, string[]> Synonyms = new(StringComparer.OrdinalIgnoreCase)
     {
-        private const string CoverText =
-            "Document de référence — construction de l’onglet Global\n" +
-            "Objectif : partir de vos fichiers sources, aligner les informations par numéro de commande (BDC) et remplir Global colonne par colonne.\n\n" +
-            "1) D’où viennent les données (nettoyage de départ)\n" +
-            "On ne garde que ce qu’il y a sous la ligne “Liste des résultats”.\n\n" +
-            "• Feuille “Commande”\n" +
-            "  Colonnes conservées : N° commande, Libellé, Fournisseur, Montant HT, Type de flux, Nature de dépense, Statut, Ind. Visa, Auteur.\n" +
-            "  On retire les lignes où Fournisseur = FCM 3MUNDI ESR-M ou Nature de dépense = Mission.\n\n" +
-            "• Feuille “Constatation”\n" +
-            "  Colonnes : Commande, extrait commande (les 5 premiers caractères de Commande), Statut.\n\n" +
-            "• Feuille “Envoi BDC”\n" +
-            "  Colonnes : Commande, Date envoi, Agent.\n" +
-            "  Les dates sont affichées sans l’heure.\n\n" +
-            "• Feuille “Factures”\n" +
-            "  Colonnes : N° commande, Montant HT, Date de règlement.\n" +
-            "  On retire les lignes où Nature de dépense = MI ou Fournisseur = FCM 3MUNDI ESR-M.\n" +
-            "  Les dates sont affichées sans l’heure.\n\n" +
-            "• Feuille “Workflow”\n" +
-            "  On garde tout. Plus tard, on y cherchera une colonne BDC (le numéro de commande) et une Date ou un Statut.\n\n" +
-            "2) La clé qui relie tout : le BDC\n" +
-            "Tout est relié avec le numéro de commande.\n\n" +
-            "• Global.A (BDC) vient de Commande → N° commande.\n" +
-            "• On cherche la même valeur :\n" +
-            "  - dans Envoi BDC → Commande,\n" +
-            "  - dans Factures → N° commande,\n" +
-            "  - dans Workflow → (colonne BDC détectée automatiquement),\n" +
-            "  - dans Constatation → Commande (ou, si rien, extrait commande = 5 premiers caractères du BDC).\n\n" +
-            "Important : le BDC est traité comme du texte (Excel ne le transforme pas).\n\n" +
-            "3) Comment on remplit chaque colonne de Global (A → K)\n" +
-            "A — BDC : Commande → N° commande (texte)\n" +
-            "B — OBJET : Commande → Libellé (\"-\" si vide)\n" +
-            "C — FOURN. : Commande → Fournisseur (\"-\" si vide)\n" +
-            "D — HT : Commande → Montant HT (base du Solde)\n" +
-            "E — VISA : Commande → Ind. Visa (\"-\" si vide)\n" +
-            "F — ENVOYE : Date envoi + Agent (Envoi BDC) si disponibles\n" +
-            "G — SF : règle BNP Régul CA / Constatation sinon \"Pas de SF connu\"\n" +
-            "H — WORKFLOW : Date (priorité) ou Statut depuis Workflow\n" +
-            "I — PAYE : 0 facture → pas de paiement connu / 1 facture → date / ≥2 → n paiements\n" +
-            "J — SOLDE : HT – somme des Montants HT factures\n" +
-            "K — STATUT : Commande → Statut (\"-\" si vide)\n\n" +
-            "4) Doublons\n" +
-            "On supprime uniquement les lignes strictement identiques (A→K).";
-        private const double CoverRowHeight = 18d;
-        private const double CoverColumnWidth = 120d;
-        private const double GlobalWidthOffset = 0.64d;
-        private static readonly double[] GlobalColumnWidths =
-        {
-            7.09d, 36.09d, 70d, 12.09d, 16d, 14d, 16.82d, 30d, 8.09d, 8.09d, 12d
-        };
+        ["N° commande"] =
+        [
+            "n commande", "no commande", "numero commande", "n de commande", "n commande", "n° commande",
+            "num commande", "n cmd", "no cmd", "numero cmd", "cmd", "commande", "order", "order id", "bdc"
+        ],
+        ["Libellé"] = ["libelle", "désignation", "designation", "objet", "description", "intitule", "intitulé", "libellé"],
+        ["Fournisseur"] = ["fournisseur", "vendor", "tiers", "fournisseu"],
+        ["Montant HT"] = ["montant ht", "total ht", "ht", "montant hors taxes", "m ht", "mnt ht", "montantht"],
+        ["Ind. Visa"] = ["ind visa", "indice visa", "indicateur visa", "visa", "visa ind", "visa (ind)", "ind? visa", "ind.? visa"],
+        ["Statut"] = ["statut", "status", "etat", "état"],
+        ["Nature de dépense"] =
+        [
+            "nature de depense", "nature de dépense", "nature depense", "nature dépense",
+            "nature de la depense", "nature de la dépense", "type de depense", "type de dépense", "nature"
+        ],
+        ["Type de flux"] = ["type de flux", "flux", "nature de flux"],
+        ["Auteur"] = ["auteur", "saisi par", "cree par", "créé par"],
+        ["Date de règlement"] =
+        [
+            "date de reglement", "date reglement", "date de paiement", "date paiement", "reglement", "paiement"
+        ],
+        ["Commande"] = ["commande", "n commande", "no commande", "numero commande", "n° commande", "cmd", "bdc"],
+        ["Statut (constatations)"] = ["statut", "etat", "état"],
+        ["Date"] = ["date", "date workflow", "workflow", "date de workflow", "dt workflow", "maj", "mise a jour", "mise à jour"]
+    };
 
-        private sealed class Table
+    public static void Process(
+        string commandesPath,
+        string? constatationsPath,
+        string? facturesPath,
+        string? envoiBdcPath,
+        string? workflowPath,
+        string outputPath,
+        Action<string> log)
+    {
+        log("Lecture des fichiers...");
+        var commandes = ProcessCommandes(commandesPath);
+        var constatations = string.IsNullOrWhiteSpace(constatationsPath) ? null : ProcessConstatations(constatationsPath);
+        var factures = string.IsNullOrWhiteSpace(facturesPath) ? null : ProcessFactures(facturesPath);
+        var envoiBdc = string.IsNullOrWhiteSpace(envoiBdcPath) ? null : ProcessEnvoiBdc(envoiBdcPath);
+        var workflow = string.IsNullOrWhiteSpace(workflowPath) ? null : ProcessWorkflow(workflowPath);
+
+        log("Construction de l'onglet Global...");
+        var global = CreateGlobal(commandes, envoiBdc, factures, workflow, constatations);
+
+        log("Écriture du fichier de sortie...");
+        WriteWorkbook(outputPath, commandes, envoiBdc, constatations, factures, workflow, global);
+
+        log("Traitement terminé.");
+    }
+
+    private static DataTable ProcessCommandes(string path)
+    {
+        var data = ReadAfterSkip(path, 20);
+        var fournisseurCol = PickColumn(data, "Fournisseur");
+        var natureCol = PickColumn(data, "Nature de dépense");
+
+        var rows = data.AsEnumerable();
+        if (fournisseurCol is not null)
         {
-            public List<string> Columns { get; } = new();
-            public List<Dictionary<string, object?>> Rows { get; } = new();
+            rows = rows.Where(row => !string.Equals(
+                CleanUpper(row[fournisseurCol]),
+                "FCM 3MUNDI ESR-M",
+                StringComparison.OrdinalIgnoreCase));
         }
 
-        private static readonly Dictionary<string, string[]> Synonyms = new()
+        if (natureCol is not null)
         {
-            ["N° commande"] = new[]
-            {
-                "n commande","no commande","numero commande","n de commande","n commande","n° commande",
-                "num commande","n cmd","no cmd","numero cmd","cmd","commande","order","order id","bdc"
-            },
-            ["Libellé"] = new[] { "libelle","désignation","designation","objet","description","intitule","intitulé","libellé","objet" },
-            ["Fournisseur"] = new[] { "fournisseur","vendor","tiers","fournisseu" },
-            ["Montant HT"] = new[] { "montant ht","total ht","ht","montant hors taxes","m ht","mnt ht","montantht" },
-            ["Ind. Visa"] = new[] { "ind visa","indice visa","indicateur visa","visa","visa ind","visa (ind)","ind? visa","ind.? visa" },
-            ["Statut"] = new[] { "statut","status","etat","état" },
-            ["Nature de dépense"] = new[]
-            {
-                "nature de depense","nature de dépense","nature depense","nature dépense",
-                "nature de la depense","nature de la dépense","type de depense","type de dépense","nature"
-            },
-            ["Type de flux"] = new[] { "type de flux","flux","nature de flux" },
-            ["Auteur"] = new[] { "auteur","saisi par","cree par","créé par" },
-            ["Date de règlement"] = new[] { "date de reglement","date reglement","date de paiement","date paiement","reglement","paiement" },
-            ["Commande"] = new[] { "commande","n commande","no commande","numero commande","n° commande","cmd","bdc" },
-            ["Statut (constatations)"] = new[] { "statut","etat","état" },
-            ["Date"] = new[] { "date","date workflow","workflow","date de workflow","dt workflow","maj","mise a jour","mise à jour" }
-        };
-
-        public static void Process(string commandesPath,
-            string constatationsPath,
-            string facturesPath,
-            string envoiBdcPath,
-            string workflowPath,
-            string outputPath,
-            Action<string>? log)
-        {
-            log?.Invoke("Lecture des sources...");
-
-            var commandes = string.IsNullOrWhiteSpace(commandesPath) ? null : ProcessCommandes(commandesPath);
-            var constatations = string.IsNullOrWhiteSpace(constatationsPath) ? null : ProcessConstatations(constatationsPath);
-            var factures = string.IsNullOrWhiteSpace(facturesPath) ? null : ProcessFactures(facturesPath);
-            var envoiBdc = string.IsNullOrWhiteSpace(envoiBdcPath) ? null : ProcessEnvoiBdc(envoiBdcPath);
-            var workflow = string.IsNullOrWhiteSpace(workflowPath) ? null : ProcessWorkflow(workflowPath);
-
-            log?.Invoke("Création du fichier de sortie...");
-            using var output = new XLWorkbook();
-
-            CreateCoverSheet(output);
-            WriteTable(output, "Commande", commandes);
-            WriteTable(output, "Envoi BDC", envoiBdc);
-            WriteTable(output, "Constatation", constatations);
-            WriteTable(output, "Factures", factures);
-            WriteTable(output, "Workflow", workflow);
-            CreateGlobalSheet(output, commandes, envoiBdc, factures, workflow, constatations);
-
-            var outputDir = Path.GetDirectoryName(outputPath);
-            if (!string.IsNullOrWhiteSpace(outputDir))
-            {
-                Directory.CreateDirectory(outputDir);
-            }
-
-            output.SaveAs(outputPath);
-            log?.Invoke($"Fichier créé : {outputPath}");
+            rows = rows.Where(row => NormalizeText(row[natureCol]) != "mission");
         }
 
-        private static Table ProcessCommandes(string path)
-        {
-            var table = ReadAfterSkip(path, 20);
-            if (table.Columns.Count == 0)
-            {
-                return table;
-            }
+        var output = CreateTable(
+            "N° commande", "Libellé", "Fournisseur", "Montant HT", "Type de flux",
+            "Nature de dépense", "Statut", "Ind. Visa", "Auteur");
 
-            var fournisseurCol = PickColumn(table.Columns, Synonyms["Fournisseur"]);
-            var natureCol = PickColumn(table.Columns, Synonyms["Nature de dépense"]);
-            var filtered = table.Rows.Where(row =>
+        var columns = output.Columns;
+        foreach (var row in rows)
+        {
+            var newRow = output.NewRow();
+            newRow["N° commande"] = GetCellValue(row, PickColumn(data, "N° commande"));
+            newRow["Libellé"] = GetCellValue(row, PickColumn(data, "Libellé"));
+            newRow["Fournisseur"] = GetCellValue(row, PickColumn(data, "Fournisseur"));
+            newRow["Montant HT"] = GetCellValue(row, PickColumn(data, "Montant HT"));
+            newRow["Type de flux"] = GetCellValue(row, PickColumn(data, "Type de flux"));
+            newRow["Nature de dépense"] = GetCellValue(row, PickColumn(data, "Nature de dépense"));
+            newRow["Statut"] = GetCellValue(row, PickColumn(data, "Statut"));
+            newRow["Ind. Visa"] = GetCellValue(row, PickColumn(data, "Ind. Visa"));
+            newRow["Auteur"] = GetCellValue(row, PickColumn(data, "Auteur"));
+            if (!RowIsEmpty(newRow, columns)) output.Rows.Add(newRow);
+        }
+
+        return output;
+    }
+
+    private static DataTable ProcessConstatations(string path)
+    {
+        var data = ReadAfterSkip(path, 17);
+        var cmdCol = PickColumn(data, "Commande");
+        var statutCol = PickColumn(data, "Statut (constatations)");
+
+        var output = CreateTable("Commande", "extrait commande", "Statut");
+        foreach (var row in data.AsEnumerable())
+        {
+            var commande = GetCellValue(row, cmdCol);
+            var commandeText = CleanValue(commande);
+            var newRow = output.NewRow();
+            newRow["Commande"] = commande;
+            newRow["extrait commande"] = string.IsNullOrWhiteSpace(commandeText) ? null : commandeText[..Math.Min(5, commandeText.Length)];
+            newRow["Statut"] = GetCellValue(row, statutCol);
+            if (!RowIsEmpty(newRow, output.Columns)) output.Rows.Add(newRow);
+        }
+
+        return output;
+    }
+
+    private static DataTable ProcessEnvoiBdc(string path)
+    {
+        var data = ReadAfterSkip(path, 0);
+        var output = CreateTable("Commande", "Date envoi", "Agent");
+
+        foreach (var row in data.AsEnumerable())
+        {
+            var newRow = output.NewRow();
+            newRow["Commande"] = data.Columns.Count > 0 ? row[0] : null;
+            newRow["Date envoi"] = data.Columns.Count > 1 ? row[1] : null;
+            newRow["Agent"] = data.Columns.Count > 2 ? row[2] : null;
+            if (!RowIsEmpty(newRow, output.Columns)) output.Rows.Add(newRow);
+        }
+
+        return output;
+    }
+
+    private static DataTable ProcessFactures(string path)
+    {
+        var data = ReadAfterSkip(path, 19);
+        var natCol = PickColumn(data, "Nature de dépense");
+        var fouCol = PickColumn(data, "Fournisseur");
+
+        var rows = data.AsEnumerable();
+        if (natCol is not null)
+        {
+            rows = rows.Where(row => !string.Equals(CleanUpper(row[natCol]), "MI", StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (fouCol is not null)
+        {
+            rows = rows.Where(row => !string.Equals(
+                CleanUpper(row[fouCol]),
+                "FCM 3MUNDI ESR-M",
+                StringComparison.OrdinalIgnoreCase));
+        }
+
+        var output = CreateTable("N° commande", "Montant HT", "Date de règlement");
+        foreach (var row in rows)
+        {
+            var newRow = output.NewRow();
+            newRow["N° commande"] = GetCellValue(row, PickColumn(data, "N° commande"));
+            newRow["Montant HT"] = GetCellValue(row, PickColumn(data, "Montant HT"));
+            newRow["Date de règlement"] = GetCellValue(row, PickColumn(data, "Date de règlement"));
+            if (!RowIsEmpty(newRow, output.Columns)) output.Rows.Add(newRow);
+        }
+
+        return output;
+    }
+
+    private static DataTable ProcessWorkflow(string path)
+    {
+        return ReadBelowMarkerOrFirst(path, "Liste des résultats");
+    }
+
+    private static DataTable CreateGlobal(
+        DataTable commandes,
+        DataTable? envoiBdc,
+        DataTable? factures,
+        DataTable? workflow,
+        DataTable? constatations)
+    {
+        var output = CreateTable("BDC", "OBJET", "FOURN.", "HT", "VISA", "ENVOYE", "SF", "WORKFLOW", "PAYE", "SOLDE", "STATUT");
+        if (commandes.Rows.Count == 0) return output;
+
+        var envoiLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (envoiBdc is not null)
+        {
+            foreach (var row in envoiBdc.AsEnumerable())
             {
-                var fournisseur = GetString(row, fournisseurCol);
-                var nature = GetString(row, natureCol);
-                if (!string.IsNullOrEmpty(fournisseur) &&
-                    fournisseur.Trim().Equals("FCM 3MUNDI ESR-M", StringComparison.OrdinalIgnoreCase))
+                var key = CleanValue(row["Commande"]);
+                if (string.IsNullOrWhiteSpace(key) || envoiLookup.ContainsKey(key)) continue;
+                var dateText = FormatDate(row["Date envoi"]);
+                var agent = CleanValue(row["Agent"]);
+                var combined = string.Join(" ", new[] { dateText, agent }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                envoiLookup[key] = combined.Trim();
+            }
+        }
+
+        var factLookup = new Dictionary<string, FactureAggregate>(StringComparer.OrdinalIgnoreCase);
+        if (factures is not null)
+        {
+            foreach (var row in factures.AsEnumerable())
+            {
+                var key = CleanValue(row["N° commande"]);
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                if (!factLookup.TryGetValue(key, out var agg))
                 {
-                    return false;
+                    agg = new FactureAggregate();
+                    factLookup[key] = agg;
                 }
 
-                if (!string.IsNullOrEmpty(nature) &&
-                    Normalize(nature) == "mission")
+                agg.Count += 1;
+                agg.Sum += ToDecimal(row["Montant HT"]);
+                if (agg.Count == 1)
                 {
-                    return false;
+                    agg.Date = TryParseDate(row["Date de règlement"]);
+                    agg.RawDate = CleanValue(row["Date de règlement"]);
                 }
-
-                return true;
-            }).ToList();
-
-            var ordered = new[]
-            {
-                ("N° commande","N° commande"),
-                ("Libellé","Libellé"),
-                ("Fournisseur","Fournisseur"),
-                ("Montant HT","Montant HT"),
-                ("Type de flux","Type de flux"),
-                ("Nature de dépense","Nature de dépense"),
-                ("Statut","Statut"),
-                ("Ind. Visa","Ind. Visa"),
-                ("Auteur","Auteur"),
-            };
-
-            return ProjectTable(table, filtered, ordered);
-        }
-
-        private static Table ProcessConstatations(string path)
-        {
-            var table = ReadAfterSkip(path, 17);
-            var cmdCol = PickColumn(table.Columns, Synonyms["Commande"]);
-            var statutCol = PickColumn(table.Columns, Synonyms["Statut (constatations)"]);
-
-            var output = new Table();
-            output.Columns.AddRange(new[] { "Commande", "extrait commande", "Statut" });
-            foreach (var row in table.Rows)
-            {
-                var cmd = GetValue(row, cmdCol);
-                var cmdText = cmd?.ToString() ?? string.Empty;
-                var shortCmd = cmdText.Length >= 5 ? cmdText[..5] : cmdText;
-                output.Rows.Add(new Dictionary<string, object?>
+                else
                 {
-                    ["Commande"] = cmd,
-                    ["extrait commande"] = shortCmd,
-                    ["Statut"] = GetValue(row, statutCol)
-                });
-            }
-
-            return output;
-        }
-
-        private static Table ProcessEnvoiBdc(string path)
-        {
-            var table = ReadAfterSkip(path, 0);
-            if (table.Columns.Count == 0)
-            {
-                return table;
-            }
-
-            var firstThree = table.Columns.Take(3).ToList();
-            while (firstThree.Count < 3)
-            {
-                firstThree.Add(string.Empty);
-            }
-
-            var output = new Table();
-            output.Columns.AddRange(new[] { "Commande", "Date envoi", "Agent" });
-            foreach (var row in table.Rows)
-            {
-                output.Rows.Add(new Dictionary<string, object?>
-                {
-                    ["Commande"] = GetValue(row, firstThree[0]),
-                    ["Date envoi"] = GetValue(row, firstThree[1]),
-                    ["Agent"] = GetValue(row, firstThree[2])
-                });
-            }
-
-            return output;
-        }
-
-        private static Table ProcessFactures(string path)
-        {
-            var table = ReadAfterSkip(path, 19);
-            var natureCol = PickColumn(table.Columns, Synonyms["Nature de dépense"]);
-            var fournisseurCol = PickColumn(table.Columns, Synonyms["Fournisseur"]);
-            var rows = table.Rows.Where(row =>
-            {
-                var nature = GetString(row, natureCol)?.Trim().ToUpperInvariant();
-                if (nature == "MI")
-                {
-                    return false;
+                    agg.Date = null;
+                    agg.RawDate = null;
                 }
-
-                var fournisseur = GetString(row, fournisseurCol)?.Trim().ToUpperInvariant();
-                if (fournisseur == "FCM 3MUNDI ESR-M")
-                {
-                    return false;
-                }
-
-                return true;
-            }).ToList();
-
-            var ordered = new[]
-            {
-                ("N° commande","N° commande"),
-                ("Montant HT","Montant HT"),
-                ("Date de règlement","Date de règlement")
-            };
-
-            return ProjectTable(table, rows, ordered);
+            }
         }
 
-        private static Table ProcessWorkflow(string path)
+        var workflowLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (workflow is not null)
         {
-            var markerTable = ReadBelowMarker(path, "Liste des résultats");
-            return markerTable.Columns.Count > 0 ? markerTable : ReadAfterSkip(path, 0);
-        }
-
-        private static Table ReadAfterSkip(string path, int skipRows)
-        {
-            using var workbook = new XLWorkbook(path);
-            var ws = workbook.Worksheets.First();
-            var rows = ws.RowsUsed()
-                .Where(row => row.RowNumber() > skipRows)
-                .ToList();
-            var headerRow = rows.FirstOrDefault(row => row.CellsUsed().Count() >= 2);
-            if (headerRow == null)
+            var (bdcCol, valueCol) = ChooseWorkflowColumns(workflow);
+            if (bdcCol is not null && valueCol is not null)
             {
-                return new Table();
-            }
-
-            var lastColumn = ws.LastColumnUsed()?.ColumnNumber() ?? headerRow.LastCellUsed()?.Address.ColumnNumber ?? 0;
-            if (lastColumn == 0)
-            {
-                return new Table();
-            }
-
-            var headers = new List<string>(lastColumn);
-            for (var i = 1; i <= lastColumn; i++)
-            {
-                headers.Add(ws.Cell(headerRow.RowNumber(), i).GetValue<string>().Trim());
-            }
-            var headerIndex = headerRow.RowNumber();
-            var table = new Table();
-            table.Columns.AddRange(headers.Where(h => !string.IsNullOrWhiteSpace(h)));
-
-            foreach (var row in ws.RowsUsed().Where(r => r.RowNumber() > headerIndex))
-            {
-                if (row.Cells().All(cell => cell.IsEmpty()))
+                foreach (var row in workflow.AsEnumerable())
                 {
-                    continue;
-                }
-
-                var dict = new Dictionary<string, object?>();
-                for (var i = 0; i < headers.Count; i++)
-                {
-                    var header = headers[i];
-                    if (string.IsNullOrWhiteSpace(header))
+                    var key = CleanValue(row[bdcCol]);
+                    if (string.IsNullOrWhiteSpace(key) || workflowLookup.ContainsKey(key)) continue;
+                    var value = FormatDate(row[valueCol]) ?? CleanValue(row[valueCol]);
+                    if (!string.IsNullOrWhiteSpace(value))
                     {
-                        continue;
-                    }
-
-                    dict[header] = ws.Cell(row.RowNumber(), i + 1).Value;
-                }
-
-                if (dict.Count > 0)
-                {
-                    table.Rows.Add(dict);
-                }
-            }
-
-            return table;
-        }
-
-        private static void CreateCoverSheet(XLWorkbook workbook)
-        {
-            var ws = workbook.AddWorksheet("Page de garde");
-            var lines = CoverText.Split('\n');
-            for (var i = 0; i < lines.Length; i++)
-            {
-                ws.Cell(i + 1, 1).Value = lines[i];
-                ws.Cell(i + 1, 1).Style.Alignment.WrapText = true;
-                ws.Cell(i + 1, 1).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
-                ws.Row(i + 1).Height = CoverRowHeight;
-            }
-
-            ws.Column(1).Width = CoverColumnWidth;
-            ws.SheetView.FreezeRows(1);
-        }
-
-        private static Table ReadBelowMarker(string path, string marker)
-        {
-            using var workbook = new XLWorkbook(path);
-            foreach (var ws in workbook.Worksheets)
-            {
-                foreach (var cell in ws.CellsUsed())
-                {
-                    var text = cell.GetValue<string>();
-                    if (Normalize(text) == Normalize(marker))
-                    {
-                        var startRow = cell.Address.RowNumber;
-                        var rows = ws.RowsUsed().Where(r => r.RowNumber() >= startRow).ToList();
-                        var headerRow = rows.FirstOrDefault(r => r.CellsUsed().Count() >= 2);
-                        if (headerRow == null)
-                        {
-                            return new Table();
-                        }
-
-                        var lastColumn = ws.LastColumnUsed()?.ColumnNumber() ?? headerRow.LastCellUsed()?.Address.ColumnNumber ?? 0;
-                        if (lastColumn == 0)
-                        {
-                            return new Table();
-                        }
-
-                        var headers = new List<string>(lastColumn);
-                        for (var i = 1; i <= lastColumn; i++)
-                        {
-                            headers.Add(ws.Cell(headerRow.RowNumber(), i).GetValue<string>().Trim());
-                        }
-                        var table = new Table();
-                        table.Columns.AddRange(headers.Where(h => !string.IsNullOrWhiteSpace(h)));
-                        var headerIndex = headerRow.RowNumber();
-                        foreach (var row in ws.RowsUsed().Where(r => r.RowNumber() > headerIndex))
-                        {
-                            if (row.Cells().All(c => c.IsEmpty()))
-                            {
-                                continue;
-                            }
-
-                            var dict = new Dictionary<string, object?>();
-                            for (var i = 0; i < headers.Count; i++)
-                            {
-                                var header = headers[i];
-                                if (string.IsNullOrWhiteSpace(header))
-                                {
-                                    continue;
-                                }
-
-                                dict[header] = ws.Cell(row.RowNumber(), i + 1).Value;
-                            }
-
-                            if (dict.Count > 0)
-                            {
-                                table.Rows.Add(dict);
-                            }
-                        }
-
-                        return table;
+                        workflowLookup[key] = value;
                     }
                 }
             }
-
-            return new Table();
         }
 
-        private static void WriteTable(XLWorkbook workbook, string name, Table? table)
+        var constatationByCmd = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var constatationByShort = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (constatations is not null)
         {
-            if (table == null || table.Columns.Count == 0)
+            foreach (var row in constatations.AsEnumerable())
             {
-                return;
-            }
-
-            var ws = workbook.AddWorksheet(name);
-            for (var i = 0; i < table.Columns.Count; i++)
-            {
-                ws.Cell(1, i + 1).Value = table.Columns[i];
-            }
-
-            for (var r = 0; r < table.Rows.Count; r++)
-            {
-                var row = table.Rows[r];
-                for (var c = 0; c < table.Columns.Count; c++)
+                var cmd = CleanValue(row["Commande"]);
+                var extrait = CleanValue(row["extrait commande"]);
+                var statut = CleanValue(row["Statut"]);
+                if (!string.IsNullOrWhiteSpace(cmd) && !constatationByCmd.ContainsKey(cmd))
                 {
-                    row.TryGetValue(table.Columns[c], out var value);
-                    var cell = ws.Cell(r + 2, c + 1);
-                    cell.Value = XLCellValue.FromObject(value ?? string.Empty);
-                    if (value is DateTime dateValue)
-                    {
-                        cell.Style.DateFormat.Format = "dd/MM/yyyy";
-                    }
+                    constatationByCmd[cmd] = statut;
                 }
-            }
-
-            AutoFitWorksheet(ws, table);
-        }
-
-        private static void AutoFitWorksheet(IXLWorksheet ws, Table table, int minWidth = 10, int maxWidth = 60, int padding = 2)
-        {
-            for (var i = 0; i < table.Columns.Count; i++)
-            {
-                var header = table.Columns[i] ?? string.Empty;
-                var maxLen = header.Length;
-                foreach (var row in table.Rows)
+                if (!string.IsNullOrWhiteSpace(extrait) && !constatationByShort.ContainsKey(extrait))
                 {
-                    if (row.TryGetValue(table.Columns[i], out var value) && value != null)
-                    {
-                        var length = value.ToString()?.Length ?? 0;
-                        if (length > maxLen)
-                        {
-                            maxLen = length;
-                        }
-                    }
+                    constatationByShort[extrait] = statut;
                 }
-
-                var width = Math.Min(maxWidth, Math.Max(minWidth, maxLen + padding));
-                ws.Column(i + 1).Width = width;
             }
         }
 
-        private static void CreateGlobalSheet(XLWorkbook workbook,
-            Table? commandes,
-            Table? envoiBdc,
-            Table? factures,
-            Table? workflow,
-            Table? constatations)
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var row in commandes.AsEnumerable())
         {
-            var ws = workbook.AddWorksheet("Global");
-            var headers = new[]
-            {
-                "BDC", "OBJET", "FOURN.", "HT", "VISA", "ENVOYE",
-                "SF", "WORKFLOW", "PAYE", "SOLDE", "STATUT"
-            };
-            for (var i = 0; i < headers.Length; i++)
-            {
-                ws.Cell(1, i + 1).Value = headers[i];
-            }
-            for (var i = 0; i < GlobalColumnWidths.Length; i++)
-            {
-                ws.Column(i + 1).Width = GlobalColumnWidths[i] + GlobalWidthOffset;
-            }
+            var bdc = CleanValue(row["N° commande"]);
+            var objet = CleanValue(row["Libellé"]);
+            var fournisseur = CleanValue(row["Fournisseur"]);
+            var htValue = row["Montant HT"];
+            var visa = CleanValue(row["Ind. Visa"]);
+            var statut = CleanValue(row["Statut"]);
 
-            var headerRow = ws.Row(1);
-            headerRow.Height = 30d;
-            headerRow.Style.Font.FontName = "Calibri";
-            headerRow.Style.Font.FontSize = 12d;
-            headerRow.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            headerRow.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            var envoi = envoiLookup.TryGetValue(bdc, out var envoiValue) ? envoiValue : string.Empty;
 
-            if (commandes == null || commandes.Columns.Count == 0)
+            var sfValue = "Pas de SF connu";
+            if (string.Equals(fournisseur, "BNP PARIBAS - REGULARISATION CARTE ACHAT", StringComparison.OrdinalIgnoreCase))
             {
-                return;
+                sfValue = "ss objet Régul CA";
             }
-
-            var envoiLookup = new Dictionary<string, string>();
-            if (envoiBdc != null)
+            else if (!string.IsNullOrWhiteSpace(envoi) &&
+                     envoi.Contains("ss objet Régul CA", StringComparison.OrdinalIgnoreCase))
             {
-                foreach (var row in envoiBdc.Rows)
+                if (constatationByCmd.TryGetValue(bdc, out var stat))
                 {
-                    var key = GetString(row, "Commande")?.Trim();
-                    if (string.IsNullOrWhiteSpace(key))
-                    {
-                        continue;
-                    }
-
-                    var dateText = FormatDate(GetValue(row, "Date envoi"));
-                    var agent = GetString(row, "Agent")?.Trim() ?? string.Empty;
-                    var value = $"{dateText} {agent}".Trim();
-                    if (!envoiLookup.ContainsKey(key))
-                    {
-                        envoiLookup[key] = value;
-                    }
+                    sfValue = stat;
+                }
+                else if (!string.IsNullOrWhiteSpace(bdc) &&
+                         constatationByShort.TryGetValue(bdc[..Math.Min(5, bdc.Length)], out var statShort))
+                {
+                    sfValue = statShort;
                 }
             }
 
-            var factAgg = new Dictionary<string, (int Count, decimal Sum, object? RawDate, DateTime? ParsedDate)>();
-            if (factures != null)
+            var workflowValue = workflowLookup.TryGetValue(bdc, out var wf) ? wf : string.Empty;
+
+            var payeValue = "pas de paiement connu";
+            var soldeValue = string.Empty;
+            if (factLookup.TryGetValue(bdc, out var factAgg))
             {
-                foreach (var row in factures.Rows)
+                if (factAgg.Count == 1)
                 {
-                    var key = GetString(row, "N° commande")?.Trim();
-                    if (string.IsNullOrWhiteSpace(key))
+                    if (factAgg.Date is not null)
                     {
-                        continue;
+                        payeValue = factAgg.Date.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
                     }
-
-                    var amount = ToDecimal(GetValue(row, "Montant HT"));
-                    var rawDate = GetValue(row, "Date de règlement");
-                    var parsed = ToDate(rawDate);
-
-                    if (!factAgg.TryGetValue(key, out var existing))
+                    else if (!string.IsNullOrWhiteSpace(factAgg.RawDate))
                     {
-                        existing = (0, 0m, null, null);
-                    }
-
-                    existing.Count += 1;
-                    existing.Sum += amount;
-                    if (existing.Count == 1)
-                    {
-                        existing.RawDate = rawDate;
-                        existing.ParsedDate = parsed;
+                        payeValue = factAgg.RawDate;
                     }
                     else
                     {
-                        existing.RawDate = null;
-                        existing.ParsedDate = null;
+                        payeValue = "date manquante";
                     }
+                }
+                else if (factAgg.Count > 1)
+                {
+                    payeValue = $"{factAgg.Count} paiement{(factAgg.Count > 1 ? "s" : string.Empty)}";
+                }
 
-                    factAgg[key] = existing;
+                var solde = ToDecimal(htValue) - factAgg.Sum;
+                soldeValue = solde.ToString("0.00", CultureInfo.InvariantCulture);
+            }
+            else if (!string.IsNullOrWhiteSpace(CleanValue(htValue)))
+            {
+                soldeValue = ToDecimal(htValue).ToString("0.00", CultureInfo.InvariantCulture);
+            }
+
+            var newRow = output.NewRow();
+            newRow["BDC"] = bdc;
+            newRow["OBJET"] = string.IsNullOrWhiteSpace(objet) ? "-" : objet;
+            newRow["FOURN."] = string.IsNullOrWhiteSpace(fournisseur) ? "-" : fournisseur;
+            newRow["HT"] = ToDecimal(htValue);
+            newRow["VISA"] = string.IsNullOrWhiteSpace(visa) ? "-" : visa;
+            newRow["ENVOYE"] = envoi;
+            newRow["SF"] = sfValue;
+            newRow["WORKFLOW"] = workflowValue;
+            newRow["PAYE"] = payeValue;
+            newRow["SOLDE"] = soldeValue;
+            newRow["STATUT"] = string.IsNullOrWhiteSpace(statut) ? "-" : statut;
+
+            var signature = string.Join("|", output.Columns.Cast<DataColumn>().Select(col => SigValue(newRow[col])));
+            if (seen.Add(signature))
+            {
+                output.Rows.Add(newRow);
+            }
+        }
+
+        return output;
+    }
+
+    private static (string? BdcColumn, string? ValueColumn) ChooseWorkflowColumns(DataTable table)
+    {
+        var bdc = PickColumn(table, "N° commande");
+        var date = PickColumn(table, "Date");
+        if (bdc is not null && date is not null) return (bdc, date);
+
+        var statut = PickColumn(table, "Statut");
+        if (bdc is not null && statut is not null) return (bdc, statut);
+
+        if (bdc is not null && table.Columns.Count > 1) return (bdc, table.Columns[1].ColumnName);
+        return (bdc, null);
+    }
+
+    private static void WriteWorkbook(
+        string outputPath,
+        DataTable commandes,
+        DataTable? envoiBdc,
+        DataTable? constatations,
+        DataTable? factures,
+        DataTable? workflow,
+        DataTable global)
+    {
+        using var workbook = new XLWorkbook();
+        AddSheet(workbook, "Commande", commandes);
+        if (envoiBdc is not null) AddSheet(workbook, "Envoi BDC", envoiBdc);
+        if (constatations is not null) AddSheet(workbook, "Constatation", constatations);
+        if (factures is not null) AddSheet(workbook, "Factures", factures);
+        if (workflow is not null) AddSheet(workbook, "Workflow", workflow);
+        AddSheet(workbook, "Global", global);
+        workbook.SaveAs(outputPath);
+    }
+
+    private static void AddSheet(XLWorkbook workbook, string name, DataTable table)
+    {
+        var sheet = workbook.Worksheets.Add(name);
+        for (var col = 0; col < table.Columns.Count; col++)
+        {
+            sheet.Cell(1, col + 1).Value = table.Columns[col].ColumnName;
+        }
+
+        for (var row = 0; row < table.Rows.Count; row++)
+        {
+            for (var col = 0; col < table.Columns.Count; col++)
+            {
+                var value = table.Rows[row][col];
+                var cell = sheet.Cell(row + 2, col + 1);
+                switch (value)
+                {
+                    case DateTime dateValue:
+                        cell.Value = dateValue.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+                        break;
+                    case decimal decValue:
+                        cell.Value = Convert.ToDouble(decValue, CultureInfo.InvariantCulture);
+                        break;
+                    case double doubleValue:
+                        cell.Value = doubleValue;
+                        break;
+                    case float floatValue:
+                        cell.Value = floatValue;
+                        break;
+                    case int intValue:
+                        cell.Value = intValue;
+                        break;
+                    case long longValue:
+                        cell.Value = longValue;
+                        break;
+                    case bool boolValue:
+                        cell.Value = boolValue;
+                        break;
+                    case DBNull:
+                    case null:
+                        cell.Value = string.Empty;
+                        break;
+                    default:
+                        cell.Value = value.ToString();
+                        break;
+                }
+            }
+        }
+
+        sheet.Columns().AdjustToContents();
+    }
+
+    private static DataTable ReadBelowMarkerOrFirst(string path, string marker)
+    {
+        using var workbook = new XLWorkbook(path);
+        var markerNorm = NormalizeText(marker);
+        foreach (var sheet in workbook.Worksheets)
+        {
+            foreach (var cell in sheet.CellsUsed())
+            {
+                if (NormalizeText(cell.GetString()) == markerNorm)
+                {
+                    return BuildTableFromWorksheet(sheet, cell.Address.RowNumber);
+                }
+            }
+        }
+
+        return ReadAfterSkip(path, 0);
+    }
+
+    private static DataTable ReadAfterSkip(string path, int skipRows)
+    {
+        using var workbook = new XLWorkbook(path);
+        var sheet = workbook.Worksheets.First();
+        return BuildTableFromWorksheet(sheet, skipRows + 1);
+    }
+
+    private static DataTable BuildTableFromWorksheet(IXLWorksheet sheet, int startRow)
+    {
+        var lastRow = sheet.LastRowUsed()?.RowNumber() ?? startRow;
+        var lastCol = sheet.LastColumnUsed()?.ColumnNumber() ?? 1;
+
+        var headerRow = -1;
+        for (var row = startRow; row <= lastRow; row++)
+        {
+            var nonEmpty = 0;
+            for (var col = 1; col <= lastCol; col++)
+            {
+                if (!string.IsNullOrWhiteSpace(sheet.Cell(row, col).GetString()))
+                {
+                    nonEmpty++;
                 }
             }
 
-            var wfLookup = new Dictionary<string, object?>();
-            if (workflow != null)
+            if (nonEmpty >= 2)
             {
-                var bdcCol = PickColumn(workflow.Columns, Synonyms["N° commande"]);
-                var valueCol = PickColumn(workflow.Columns, Synonyms["Date"]) ??
-                               PickColumn(workflow.Columns, Synonyms["Statut"]);
-                foreach (var row in workflow.Rows)
-                {
-                    var key = GetString(row, bdcCol)?.Trim();
-                    if (string.IsNullOrWhiteSpace(key))
-                    {
-                        continue;
-                    }
+                headerRow = row;
+                break;
+            }
+        }
 
-                    wfLookup[key] = valueCol != null ? GetValue(row, valueCol) : null;
-                }
+        var table = new DataTable();
+        if (headerRow == -1) return table;
+
+        var headers = new List<string>();
+        for (var col = 1; col <= lastCol; col++)
+        {
+            var header = sheet.Cell(headerRow, col).GetString().Trim();
+            if (string.IsNullOrWhiteSpace(header))
+            {
+                header = $"Column{col}";
             }
 
-            var constFull = new Dictionary<string, object?>();
-            var constShort = new Dictionary<string, object?>();
-            if (constatations != null)
+            header = DeduplicateHeader(headers, header);
+            headers.Add(header);
+            table.Columns.Add(header);
+        }
+
+        for (var row = headerRow + 1; row <= lastRow; row++)
+        {
+            var dataRow = table.NewRow();
+            var hasValue = false;
+            for (var col = 1; col <= lastCol; col++)
             {
-                foreach (var row in constatations.Rows)
+                var cell = sheet.Cell(row, col);
+                object value = cell.DataType switch
                 {
-                    var full = GetString(row, "Commande")?.Trim();
-                    var shortKey = GetString(row, "extrait commande")?.Trim();
-                    var status = GetValue(row, "Statut");
-                    if (!string.IsNullOrWhiteSpace(full))
-                    {
-                        constFull[full] = status;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(shortKey))
-                    {
-                        constShort[shortKey] = status;
-                    }
-                }
-            }
-
-            var seen = new HashSet<string>();
-            var rowIndex = 2;
-            foreach (var row in commandes.Rows)
-            {
-                var bdc = GetString(row, "N° commande")?.Trim();
-                if (string.IsNullOrWhiteSpace(bdc))
-                {
-                    continue;
-                }
-
-                var objet = GetString(row, "Libellé") ?? "-";
-                var fournisseur = GetString(row, "Fournisseur") ?? "-";
-                var htValue = GetValue(row, "Montant HT");
-                var visa = GetString(row, "Ind. Visa") ?? "-";
-                var envoi = envoiLookup.TryGetValue(bdc, out var envoiValue) ? envoiValue : string.Empty;
-
-                var sf = "Pas de SF connu";
-                if (string.Equals(fournisseur?.Trim(), "BNP PARIBAS - REGULARISATION CARTE ACHAT",
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    sf = "ss objet Régul CA";
-                }
-                else if (Normalize(envoi).Contains("ss objet regul ca"))
-                {
-                    if (constFull.TryGetValue(bdc, out var status) || constShort.TryGetValue(bdc[..Math.Min(5, bdc.Length)], out status))
-                    {
-                        sf = status?.ToString() ?? "Pas de SF connu";
-                    }
-                }
-
-                wfLookup.TryGetValue(bdc, out var workflowValue);
-                var workflowDisplay = workflowValue ?? string.Empty;
-
-                var paye = "pas de paiement connu";
-                if (factAgg.TryGetValue(bdc, out var agg))
-                {
-                    if (agg.Count == 1)
-                    {
-                        paye = agg.ParsedDate.HasValue ? agg.ParsedDate.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)
-                            : agg.RawDate?.ToString() ?? "date manquante";
-                    }
-                    else
-                    {
-                        paye = $"{agg.Count} paiement{(agg.Count >= 2 ? "s" : string.Empty)}";
-                    }
-                }
-
-                var solde = ToDecimal(htValue) - (factAgg.TryGetValue(bdc, out agg) ? agg.Sum : 0m);
-                var statut = GetString(row, "Statut") ?? "-";
-
-                var values = new object?[]
-                {
-                    bdc, objet, fournisseur, htValue ?? string.Empty, visa, envoi, sf,
-                    workflowDisplay, paye, solde, statut
+                    XLDataType.DateTime => cell.GetDateTime(),
+                    XLDataType.Number => cell.GetDouble(),
+                    XLDataType.Boolean => cell.GetBoolean(),
+                    _ => cell.GetString()
                 };
-                var signature = string.Join("|", values.Select(SignatureValue));
-                if (!seen.Add(signature))
+                dataRow[col - 1] = value;
+                if (!string.IsNullOrWhiteSpace(cell.GetString()))
                 {
-                    continue;
+                    hasValue = true;
                 }
-
-                for (var c = 0; c < values.Length; c++)
-                {
-                    var cell = ws.Cell(rowIndex, c + 1);
-                    cell.Value = XLCellValue.FromObject(values[c] ?? string.Empty);
-                    cell.Style.Font.FontName = "Calibri";
-                    cell.Style.Font.FontSize = 9d;
-                    cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-                    cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-                    if (values[c] is DateTime dateVal)
-                    {
-                        cell.Style.DateFormat.Format = "dd/MM/yyyy";
-                    }
-                }
-
-                ws.Row(rowIndex).Height = 30d;
-                ws.Cell(rowIndex, 1).Style.NumberFormat.Format = "@";
-                ws.Cell(rowIndex, 10).Style.NumberFormat.Format = "0.00";
-                rowIndex++;
             }
+
+            if (hasValue) table.Rows.Add(dataRow);
         }
 
-        private static Table ProjectTable(Table source, List<Dictionary<string, object?>> rows,
-            (string Target, string SynKey)[] order)
+        return table;
+    }
+
+    private static string DeduplicateHeader(ICollection<string> existing, string header)
+    {
+        if (!existing.Contains(header)) return header;
+        var index = 2;
+        var candidate = $"{header} {index}";
+        while (existing.Contains(candidate))
         {
-            var output = new Table();
-            foreach (var (target, synKey) in order)
+            index++;
+            candidate = $"{header} {index}";
+        }
+        return candidate;
+    }
+
+    private static DataTable CreateTable(params string[] columns)
+    {
+        var table = new DataTable();
+        foreach (var column in columns)
+        {
+            table.Columns.Add(column);
+        }
+        return table;
+    }
+
+    private static string? PickColumn(DataTable table, string key)
+    {
+        if (!Synonyms.TryGetValue(key, out var synonyms)) return null;
+        var normalized = table.Columns.Cast<DataColumn>()
+            .ToDictionary(col => NormalizeText(col.ColumnName), col => col.ColumnName, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var synonym in synonyms)
+        {
+            var norm = NormalizeText(synonym);
+            if (normalized.TryGetValue(norm, out var exact)) return exact;
+        }
+
+        foreach (var synonym in synonyms)
+        {
+            var norm = NormalizeText(synonym);
+            foreach (var entry in normalized)
             {
-                output.Columns.Add(target);
-                var column = PickColumn(source.Columns, Synonyms[synKey]);
-                foreach (var row in rows)
+                if (entry.Key.Contains(norm, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!row.ContainsKey(target))
-                    {
-                        row[target] = column != null ? GetValue(row, column) : null;
-                    }
+                    return entry.Value;
                 }
             }
-
-            foreach (var row in rows)
-            {
-                var projected = new Dictionary<string, object?>();
-                foreach (var (target, _) in order)
-                {
-                    row.TryGetValue(target, out var value);
-                    projected[target] = value;
-                }
-                output.Rows.Add(projected);
-            }
-
-            return output;
         }
 
-        private static string? PickColumn(IEnumerable<string> columns, IEnumerable<string> synonyms)
+        return null;
+    }
+
+    private static object? GetCellValue(DataRow row, string? column)
+    {
+        return column is null || !row.Table.Columns.Contains(column) ? null : row[column];
+    }
+
+    private static bool RowIsEmpty(DataRow row, DataColumnCollection columns)
+    {
+        foreach (DataColumn column in columns)
         {
-            var map = new Dictionary<string, string>();
-            foreach (var col in columns)
+            if (!string.IsNullOrWhiteSpace(CleanValue(row[column])))
             {
-                var key = Normalize(col);
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    continue;
-                }
-
-                if (!map.ContainsKey(key))
-                {
-                    map[key] = col;
-                }
+                return false;
             }
-            foreach (var syn in synonyms)
-            {
-                var normalized = Normalize(syn);
-                if (map.TryGetValue(normalized, out var col))
-                {
-                    return col;
-                }
-            }
-
-            foreach (var syn in synonyms)
-            {
-                var normalized = Normalize(syn);
-                var match = map.Keys.FirstOrDefault(k => k.Contains(normalized));
-                if (match != null)
-                {
-                    return map[match];
-                }
-            }
-
-            return null;
         }
+        return true;
+    }
 
-        private static object? GetValue(Dictionary<string, object?> row, string? column)
+    private static string CleanValue(object? value)
+    {
+        return value?.ToString()?.Trim() ?? string.Empty;
+    }
+
+    private static string CleanUpper(object? value)
+    {
+        return CleanValue(value).ToUpperInvariant();
+    }
+
+    private static string NormalizeText(object? value)
+    {
+        var text = CleanValue(value).ToLowerInvariant();
+        var normalized = text.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder();
+        foreach (var ch in normalized)
         {
-            if (string.IsNullOrWhiteSpace(column))
+            var category = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (category == UnicodeCategory.NonSpacingMark) continue;
+            if (char.IsLetterOrDigit(ch) || char.IsWhiteSpace(ch))
             {
-                return null;
+                builder.Append(ch);
             }
-
-            row.TryGetValue(column, out var value);
-            return value;
         }
+        return string.Join(' ', builder.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
 
-        private static string? GetString(Dictionary<string, object?> row, string? column)
-            => GetValue(row, column)?.ToString();
+    private static decimal ToDecimal(object? value)
+    {
+        if (value is null) return 0m;
+        if (value is decimal dec) return dec;
+        if (value is double dbl) return (decimal)dbl;
+        if (value is int i) return i;
 
-        private static string Normalize(string? value)
+        var text = CleanValue(value);
+        text = text.Replace("\u00a0", string.Empty)
+            .Replace("\u202f", string.Empty)
+            .Replace("€", string.Empty)
+            .Replace(" ", string.Empty)
+            .Replace(',', '.');
+
+        return decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var result) ? result : 0m;
+    }
+
+    private static DateTime? TryParseDate(object? value)
+    {
+        if (value is DateTime dateTime) return dateTime.Date;
+        if (value is double dbl) return DateTime.FromOADate(dbl).Date;
+
+        var text = CleanValue(value);
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        if (DateTime.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.None, out var parsed))
         {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return string.Empty;
-            }
-
-            var normalized = value.Normalize(NormalizationForm.FormD);
-            var builder = new StringBuilder();
-            foreach (var ch in normalized)
-            {
-                var unicode = CharUnicodeInfo.GetUnicodeCategory(ch);
-                if (unicode != UnicodeCategory.NonSpacingMark)
-                {
-                    builder.Append(ch);
-                }
-            }
-
-            var cleaned = new string(builder.ToString().ToLowerInvariant().Select(ch => char.IsLetterOrDigit(ch) ? ch : ' ').ToArray());
-            return string.Join(' ', cleaned.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
+            return parsed.Date;
         }
 
-        private static decimal ToDecimal(object? value)
+        if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed))
         {
-            if (value == null)
-            {
-                return 0m;
-            }
-
-            if (value is decimal dec)
-            {
-                return dec;
-            }
-
-            if (value is double dbl)
-            {
-                return Convert.ToDecimal(dbl);
-            }
-
-            if (value is int i)
-            {
-                return i;
-            }
-
-            var text = value.ToString() ?? string.Empty;
-            text = text.Replace("\u00a0", string.Empty).Replace("\u202f", string.Empty);
-            text = text.Replace("€", string.Empty).Replace(" ", string.Empty).Replace(",", ".");
-            return decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var result) ? result : 0m;
+            return parsed.Date;
         }
 
-        private static DateTime? ToDate(object? value)
-        {
-            if (value is DateTime dt)
-            {
-                return dt.Date;
-            }
+        return null;
+    }
 
-            if (value == null)
-            {
-                return null;
-            }
+    private static string? FormatDate(object? value)
+    {
+        var date = TryParseDate(value);
+        return date?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+    }
 
-            if (DateTime.TryParse(value.ToString(), new CultureInfo("fr-FR"), DateTimeStyles.None, out var parsed))
-            {
-                return parsed.Date;
-            }
+    private static string SigValue(object? value)
+    {
+        if (value is DateTime dt) return dt.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+        if (value is decimal dec) return dec.ToString("0.########", CultureInfo.InvariantCulture);
+        return CleanValue(value);
+    }
 
-            return null;
-        }
-
-        private static string FormatDate(object? value)
-        {
-            var date = ToDate(value);
-            return date.HasValue ? date.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) : value?.ToString() ?? string.Empty;
-        }
-
-        private static string SignatureValue(object? value)
-        {
-            if (value is DateTime date)
-            {
-                return date.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
-            }
-
-            if (value is decimal dec)
-            {
-                return dec.ToString(CultureInfo.InvariantCulture);
-            }
-
-            if (value is double dbl)
-            {
-                return dbl.ToString("G", CultureInfo.InvariantCulture);
-            }
-
-            return value?.ToString() ?? string.Empty;
-        }
+    private sealed class FactureAggregate
+    {
+        public int Count { get; set; }
+        public decimal Sum { get; set; }
+        public DateTime? Date { get; set; }
+        public string? RawDate { get; set; }
     }
 }

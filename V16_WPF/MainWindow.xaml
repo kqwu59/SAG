@@ -75,6 +75,10 @@
                              Margin="8,0"
                              AllowDrop="True" />
                     <Button x:Name="BrowseCommandesButton" Grid.Column="2" Content="Parcourir…" />
+                             AllowDrop="True"
+                             PreviewDragOver="OnFileDragOver"
+                             Drop="OnFileDrop" />
+                    <Button Grid.Column="2" Content="Parcourir…" Click="OnBrowseCommandes" />
                 </Grid>
                 <Grid Margin="0,4">
                     <Grid.ColumnDefinitions>
@@ -86,8 +90,10 @@
                     <TextBox x:Name="ConstatationsTextBox"
                              Grid.Column="1"
                              Margin="8,0"
-                             AllowDrop="True" />
-                    <Button x:Name="BrowseConstatationsButton" Grid.Column="2" Content="Parcourir…" />
+                             AllowDrop="True"
+                             PreviewDragOver="OnFileDragOver"
+                             Drop="OnFileDrop" />
+                    <Button Grid.Column="2" Content="Parcourir…" Click="OnBrowseConstatations" />
                 </Grid>
                 <Grid Margin="0,4">
                     <Grid.ColumnDefinitions>
@@ -99,8 +105,10 @@
                     <TextBox x:Name="FacturesTextBox"
                              Grid.Column="1"
                              Margin="8,0"
-                             AllowDrop="True" />
-                    <Button x:Name="BrowseFacturesButton" Grid.Column="2" Content="Parcourir…" />
+                             AllowDrop="True"
+                             PreviewDragOver="OnFileDragOver"
+                             Drop="OnFileDrop" />
+                    <Button Grid.Column="2" Content="Parcourir…" Click="OnBrowseFactures" />
                 </Grid>
                 <Grid Margin="0,4">
                     <Grid.ColumnDefinitions>
@@ -112,8 +120,10 @@
                     <TextBox x:Name="EnvoiBdcTextBox"
                              Grid.Column="1"
                              Margin="8,0"
-                             AllowDrop="True" />
-                    <Button x:Name="BrowseEnvoiBdcButton" Grid.Column="2" Content="Parcourir…" />
+                             AllowDrop="True"
+                             PreviewDragOver="OnFileDragOver"
+                             Drop="OnFileDrop" />
+                    <Button Grid.Column="2" Content="Parcourir…" Click="OnBrowseEnvoiBdc" />
                 </Grid>
                 <Grid Margin="0,4">
                     <Grid.ColumnDefinitions>
@@ -125,8 +135,10 @@
                     <TextBox x:Name="WorkflowTextBox"
                              Grid.Column="1"
                              Margin="8,0"
-                             AllowDrop="True" />
-                    <Button x:Name="BrowseWorkflowButton" Grid.Column="2" Content="Parcourir…" />
+                             AllowDrop="True"
+                             PreviewDragOver="OnFileDragOver"
+                             Drop="OnFileDrop" />
+                    <Button Grid.Column="2" Content="Parcourir…" Click="OnBrowseWorkflow" />
                 </Grid>
             </StackPanel>
         </Border>
@@ -141,10 +153,10 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Fichier de sortie (.xlsx)" />
                 <TextBox x:Name="OutputTextBox" Grid.Column="1" Margin="8,0" />
-                <Button x:Name="BrowseOutputButton" Grid.Column="2" Content="Parcourir…" />
+                <Button Grid.Column="2" Content="Parcourir…" Click="OnBrowseOutput" />
                 <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="RunButton" Style="{StaticResource PrimaryButton}" Content="Lancer le traitement" />
-                    <Button x:Name="ClearButton" Content="Vider les champs" Margin="8,0,0,0" />
+                    <Button Style="{StaticResource PrimaryButton}" Content="Lancer le traitement" />
+                    <Button Content="Vider les champs" Margin="8,0,0,0" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -156,8 +168,7 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <TextBlock FontWeight="SemiBold" Text="Journal" />
-                <TextBox x:Name="LogTextBox"
-                         Grid.Row="1"
+                <TextBox Grid.Row="1"
                          Margin="0,8,0,0"
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto"
@@ -175,7 +186,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="StatusTextBlock" Text="Prêt" />
+                <TextBlock Text="Prêt" />
                 <TextBlock Grid.Column="1" Foreground="{StaticResource MutedText}" Text="V16 (WPF)" />
             </Grid>
         </Border>
